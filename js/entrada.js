@@ -13,8 +13,12 @@
   // 3) tarjeta: entidad del archivo + cuenta de tipo Tarjeta de esa entidad
   // 4) BBVA sin número de cuenta: la cuenta cuyo saldo y movimientos encajan con el archivo
   const BANCOS = [['BBVA', /BBVA|Fecha de generaci.n del informe/i], ['Santander', /SANTANDER/i], ['Caixa', /CAIXA|\b2100\b|ES\d\d ?2100/i], ['Trade Republic', /TRADE REPUBLIC/i]];
-  function detectCuenta(cabecera, tarjetas, rows) {
+  function detectCuenta(cabecera, tarjetas, rows, nombre = '', firma = '') {
     const C = App.state.cuentas, dCab = digits(cabecera);
+    // si el nombre del archivo lleva el número de una cuenta ("Cta 3371 extracto.xlsx"), esa cuenta manda (se ignoran años)
+    const enNombre = (nombre.match(/(?<!\d)\d{4}(?!\d)/g) || []).filter(n => !/^(19|20)\d\d$/.test(n));
+    const porNombre = C.find(c => App.cuentaGrupo(c) !== 'Tarjetas' && enNombre.includes((c.id.match(/\d{4}/) || [])[0]));
+    if (porNombre) return { cuenta: porNombre.id, motivo: `nº ${(porNombre.id.match(/\d{4}/) || [])[0]} en el nombre del archivo`, ident: '' };
     for (const c of C) for (const id of (c.identificadores || [])) { const d = digits(id); if (d.length >= 8 && (dCab.includes(d) || tarjetas.some(t => digits(t) === d))) return { cuenta: c.id, motivo: 'identificador guardado', ident: id }; }
     // IBAN español: ES + 2 dígitos + 20 dígitos (con o sin espacios cada 4)
     const iban = (cabecera.match(/ES\d{2}(?:\s?\d{4}){5}/) || cabecera.match(/CCC:?\s*(?:\d{4}\s?){2}\d{2}\s?\d{10}/) || [])[0];
@@ -35,8 +39,9 @@
         if (!best || sc > best.sc) best = { c, sc };
       });
       if (best && (best.sc > 0 || cands.length === 1)) return { cuenta: best.c.id, motivo: best.sc ? `${banco}: encaja con su saldo/movimientos` : banco, ident: '', banco };
-      const recordada = (App.state.settings.cuentaPorBanco || {})[banco];
-      if (recordada && App.cuentaOf(recordada)) return { cuenta: recordada, motivo: `${banco}: la cuenta que elegiste la última vez`, ident: '', banco };
+      // solo se recuerda lo que eliges tú a mano (no lo que la app dedujo), por banco y formato de archivo
+      const recordada = (App.state.settings.cuentaPorFormato || {})[banco + '|' + (firma || '')];
+      if (recordada && App.cuentaOf(recordada)) return { cuenta: recordada, motivo: `${banco}: la cuenta que elegiste la última vez para este tipo de archivo`, ident: '', banco };
       return { cuenta: '', motivo: `${banco}: el archivo no indica la cuenta, elígela (se recordará)`, ident: '', banco };
     }
     return { cuenta: App._cap.detectAccount(cabecera) || '', motivo: 'por el nombre del archivo', ident: '' };
@@ -231,8 +236,9 @@
         const cab = name + ' ' + aoa.slice(0, Math.min(h.row + 1, 12)).map(r => r.join(' ')).join(' ');
         const tarjetas = h.map.tarjeta != null ? Array.from(new Set(aoa.slice(h.row + 1).map(r => String(r[h.map.tarjeta] || '')).filter(t => digits(t).length >= 15))) : [];
         const yaTieneCuenta = rows.some(r => r.cuenta);
-        const det = yaTieneCuenta ? { cuenta: '', motivo: 'el archivo trae la columna Cuenta' } : detectCuenta(cab, tarjetas, rows);
-        return { tipo: 'extracto', formato: (BANCOS.find(([, re]) => re.test(cab)) || ['Excel'])[0], rows, ...det, multiCuenta: yaTieneCuenta };
+        const firma = h.headers.map(x => App.norm(x)).filter(Boolean).join('|');   // "huella" del formato de columnas
+        const det = yaTieneCuenta ? { cuenta: '', motivo: 'el archivo trae la columna Cuenta' } : detectCuenta(cab, tarjetas, rows, name, firma);
+        return { tipo: 'extracto', formato: (BANCOS.find(([, re]) => re.test(cab)) || ['Excel'])[0], rows, ...det, firma, multiCuenta: yaTieneCuenta };
       }
       return { tipo: 'desconocido', error: 'No se ha encontrado una tabla de movimientos (Fecha / Concepto / Importe).' };
     }
@@ -315,7 +321,9 @@
           resumen.importados += nuevos.length;
           // aprende el IBAN / nº de tarjeta para reconocer la cuenta a la primera la próxima vez
           const c = App.cuentaOf(cuenta); if (c && it.res.ident && !(c.identificadores || []).some(x => digits(x) === digits(it.res.ident))) c.identificadores = [...(c.identificadores || []), it.res.ident];
-          if (c && !it.res.ident && it.res.banco) App.state.settings.cuentaPorBanco = { ...(App.state.settings.cuentaPorBanco || {}), [it.res.banco]: c.id };
+          // si la elegiste tú a mano en un archivo sin número de cuenta, se recuerda para ese banco y formato
+          if (c && it.cuentaManual && !it.res.ident && it.res.banco) App.state.settings.cuentaPorFormato = { ...(App.state.settings.cuentaPorFormato || {}), [it.res.banco + '|' + (it.res.firma || '')]: c.id };
+          delete App.state.settings.cuentaPorBanco;   // criterio antiguo (por banco), que confundía las dos cuentas BBVA
           const fechas = it.res.rows.map(r => r.fecha).sort(), desde = fechas[0], hasta = fechas[fechas.length - 1];
           const destino = await App.drive.folderPath([carpetaDatos(), 'Extractos', cuenta || 'Varias', hasta.slice(0, 4)]);
           const nombre = `Extracto-${cuenta || 'Varias'}-${desde}_${hasta}.${ext(it.name)}`;
@@ -383,10 +391,13 @@
       finally { S.splice(S.length - tmp.length, tmp.length); }
     };
     const render = () => {
+      // conserva la posición (vertical y horizontal) al redibujar la tabla
+      const wrap0 = pane.querySelector('.table-wrap'), sx = wrap0 ? wrap0.scrollLeft : 0, sy = window.scrollY;
       previewDocs();
       const ctaOpts = (sel) => `<option value="">— elegir cuenta —</option>` + App.state.cuentas.map(c => `<option value="${App.esc(c.id)}" ${c.id === sel ? 'selected' : ''}>${App.esc(c.id)} · ${App.esc(c.banco)}</option>`).join('');
       pane.innerHTML = `<div class="card"><div class="row"><h2 style="margin:0">📥 ${App.esc(carpetaDatos())}/Entrada <span class="muted small">${items.filter(i => !i.esZip).length} archivos</span></h2><span class="spacer"></span><button class="btn" id="reload">Volver a mirar</button><button class="btn btn-primary" id="go">Importar y archivar</button></div>
-        <div class="table-wrap mt"><table class="t"><thead><tr><th>Archivo</th><th>Qué es</th><th>Cuenta</th><th>Periodo</th><th class="num">Nuevos</th><th class="num">Ya estaban</th><th>Acción</th></tr></thead><tbody>
+        <div class="table-wrap mt"><table class="t entrada"><colgroup><col style="width:17%"><col style="width:17%"><col style="width:19%"><col style="width:10%"><col style="width:17%"><col style="width:5%"><col style="width:15%"></colgroup>
+        <thead><tr><th>Archivo</th><th>Qué es</th><th>Cuenta</th><th>Periodo</th><th class="num">Nuevos</th><th class="num">Ya estaban</th><th>Acción</th></tr></thead><tbody>
         ${items.map((it, i) => {
           if (it.esZip) return `<tr><td>${App.esc(it.name)}</td><td colspan="5" class="muted small">ZIP abierto: sus archivos aparecen en la lista</td><td class="small">se guardará en Extractos/ZIP procesados</td></tr>`;
           const r = it.res || {}; const p = preview(it); const cuenta = it.cuenta ?? r.cuenta;
@@ -407,7 +418,8 @@
           return `<tr><td class="wrap small">${App.esc(it.name)}</td><td colspan="5" class="small neg">${App.esc(r.error || 'No reconocido')}</td><td class="small muted">se queda en Entrada</td></tr>`;
         }).join('')}</tbody></table></div>
         <p class="small muted">Los movimientos que ya estaban (misma cuenta, fecha e importe) no se duplican. Cada extracto se archiva renombrado como <i>Extracto-cuenta-desde_hasta</i> en ${App.esc(carpetaDatos())}/Extractos/&lt;cuenta&gt;/&lt;año&gt;/. Los originales no se modifican.</p></div>`;
-      App.$$('[data-cta]', pane).forEach(s => s.onchange = () => { items[+s.dataset.cta].cuenta = s.value; render(); });
+      { const w = pane.querySelector('.table-wrap'); if (w) w.scrollLeft = sx; window.scrollTo(0, sy); }
+      App.$$('[data-cta]', pane).forEach(s => s.onchange = () => { const it = items[+s.dataset.cta]; it.cuenta = s.value; it.cuentaManual = true; render(); });
       App.$$('[data-skip]', pane).forEach(c => c.onchange = () => { items[+c.dataset.skip].omitir = !c.checked; render(); });
       App.$$('[data-doc]', pane).forEach(s => s.onchange = () => { const it = items[+s.dataset.doc]; it.destino = s.value; it.destinoManual = true; });
       // al cambiar el nombre se vuelve a comprobar si se repite; si ya no, pasa a guardarse

@@ -141,3 +141,7 @@ table.t tr.row-ok td:first-child{box-shadow:inset 3px 0 0 var(--good)}
 .bar-inline{height:8px;border-radius:4px;background:var(--s2);display:inline-block;vertical-align:middle}
 @media print{.topbar,.sidenav,.bottomnav,.actions,.filters{display:none!important}.view{padding:0}}
 .modal-card.wide{width:min(1080px,100%)}
+/* Bandeja Entrada: la tabla se ajusta al ancho de la pantalla (sin desplazamiento lateral en el ordenador) */
+table.t.entrada{table-layout:fixed;min-width:900px}
+table.t.entrada td,table.t.entrada th{white-space:normal;word-break:break-word;vertical-align:top}
+table.t.entrada select,table.t.entrada input:not([type=checkbox]){width:100%;min-width:0}
