@@ -178,8 +178,8 @@
   /* Nombre según tu convención; si el movimiento no tiene beneficiario se usa el emisor del documento */
   // el proveedor es quien emite el documento; si no se reconoce, el beneficiario del movimiento
   const nombreDoc = (m, info, e) => App.docName({ ...m, beneficiario: (info.emisorDebil ? m.beneficiario || info.emisor : info.emisor || m.beneficiario) || 'Proveedor' }, e);
-  const nombreSinMov = (info, e) => [info.tipoDoc, info.emisor || 'Desconocido', info.fechaDoc || App.today()]
-    .map(s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w ]+/g, '').trim().replace(/\s+/g, '_')).join('-') + '.' + e;
+  // documento sin movimiento (informes, justificantes anuales…): Doc-Tipo-Emisor-AAAA_MM_DD
+  const nombreSinMov = (info, e) => ['Doc', info.tipoDoc, App.docClean(info.emisor || 'Desconocido').slice(0, 40)].map(s => App.docClean(s) || 'X').join('-') + '-' + App.docFecha(info.fechaDoc) + '.' + e;
 
   /* ---------- Los PDF siguen al movimiento ----------
      El nombre de cada documento vinculado se deriva de la clasificación de su movimiento. Si corriges el movimiento

@@ -54,7 +54,7 @@ El código publicado no contiene datos personales: los datos solo están en tus 
   - Importa los movimientos sin duplicados: compara cuenta, fecha e importe, aunque el concepto esté escrito distinto o tú lo tuvieras desglosado en varias líneas.
   - Aplica plantillas y reglas.
   - Archiva cada extracto como `Extracto-<cuenta>-<desde>_<hasta>` en `MiEconomia/Extractos/<cuenta>/<año>/`.
-  - **Recibos, justificantes y facturas**: los PDF que no son extractos se vinculan a su movimiento y se guardan en `MiEconomia/Facturas` con tu convención `Tipo-Bloque-Bien-Categoría-Subcategoría-Proveedor-Fecha`.
+  - **Recibos, justificantes y facturas**: los PDF que no son extractos se vinculan a su movimiento y se guardan en `MiEconomia/Facturas` con tu formato abreviado `Tipo-Área-Activo-Cat-Sub-Proveedor-AAAA_MM_DD` (p. ej. `G-P-Fran6_5I-Sum-Ele-Endesa-2026_09_08.pdf`; sin activo, `Gral`).
     - El movimiento se busca por cuenta (IBAN, IBAN enmascarado o tarjeta), importe y fecha de cargo.
     - Los recibos que juntos forman un cargo agrupado (MyBox) se vinculan cada uno a su partida.
     - Los informativos (plan de pensiones, costes de Trade Republic) se guardan renombrados, sin vincular.

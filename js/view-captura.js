@@ -45,13 +45,15 @@
     return { total, fecha, nif: nif.replace(/[- ]/g, ''), proveedor, factura };
   };
 
-  /* Nombre de archivo según tu convención: Tipo-Bloque-Bien-Categoría-Subcategoría-Proveedor-Fecha */
+  /* Nombre de archivo con tu formato abreviado: Tipo-Área-Activo-Cat-Sub-Proveedor-AAAA_MM_DD
+     p. ej. G-P-Fran6_5I-Sum-Ele-Endesa-2026_09_08.pdf  (sin activo → "Gral") */
+  App.docClean = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\\/:*?"<>|#%]+/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+  App.docFecha = (iso) => String(iso || App.today()).slice(0, 10).replace(/-/g, '_');
   App.docName = (m, ext) => {
-    const clean = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w ]+/g, '').trim().replace(/\s+/g, '_');
-    // si la categoría o el área no están en el maestro se usa el código tal cual (Rie, Sum…), sin el texto "(sin maestro)"
-    const c = App.catOf(m.agrup), [cod, sub] = String(m.agrup || '').split(':');
-    const area = App.idx.area[m.area]?.nombre || m.area;
-    return [App.idx.tipo[m.tipo]?.nombre || m.tipo, area, m.activo || 'NA', c ? (c.categoria || c.supra) : (cod || 'SinCategoria'), (c ? c.subcategoria : sub) || 'NA', m.beneficiario || 'Proveedor', m.fecha].map(clean).join('-') + '.' + ext;
+    const [cat, sub] = String(m.agrup || '').split(':').map(s => s.trim());
+    const prov = App.docClean(m.beneficiario || 'Proveedor').slice(0, 40);
+    return [m.tipo || 'X', m.area || 'X', App.docClean(m.activo) || 'Gral', cat || 'Sin', sub || cat || 'Sin', prov]
+      .map(s => App.docClean(s) || 'X').join('-') + '-' + App.docFecha(m.fecha) + '.' + ext;
   };
 
   async function storeDoc(file, mov) {
