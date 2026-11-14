@@ -110,13 +110,35 @@
       const { file } = await App.drive.findDataFile(); if (!file) return null;
       const r = await api(`files/${file.id}?alt=media`, { raw: true }); return r.json();
     },
-    async push() {
+    /* ---------- Protecciones de la sincronización ----------
+       · Un dispositivo que nunca se ha sincronizado DESCARGA primero (nunca sube encima de Drive).
+       · Nunca se sube una copia sin movimientos, o con menos de la mitad que la última conocida de Drive, sin confirmarlo.
+       · Nunca se descarga un Drive sin movimientos (o mucho más pequeño) encima de una copia con datos sin confirmarlo.
+       Ante la duda no se hace nada y se avisa. */
+    n(state) { return (state && state.movimientos ? state.movimientos.length : 0); },
+    async push(force = false) {
       const { folderId, file } = await App.drive.findDataFile();
+      const remN = +localStorage.getItem('remoteCount') || 0, locN = App.drive.n(App.state);
+      if (!force && !localStorage.getItem('syncedOnce') && file) { status('☁️ Pendiente de sincronizar'); return 'skip'; }
+      if (!force && remN > 0 && (locN === 0 || (remN > 50 && locN < remN * 0.5))) {
+        status('⚠️ Sin subir: esta copia tiene muchos menos datos que Drive');
+        App.toast(`No se ha subido a Drive: este dispositivo tiene ${App.int(locN)} movimientos y Drive ${App.int(remN)}. Ve a Ajustes › Sincronizar ahora para decidir.`, 8000);
+        return 'blocked';
+      }
       const data = App.db.export(); delete data.settings.googleClientId;
       const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
       await upload(blob, DATA_FILE, folderId, file?.id);
       localStorage.setItem('lastPush', App.state.updatedAt || '');
+      localStorage.setItem('remoteCount', String(locN)); localStorage.setItem('syncedOnce', '1');
       status('☁️ Sincronizado ' + new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }));
+      return 'pushed';
+    },
+    async aplicarRemoto(remote) {
+      const keep = App.state.settings; remote.settings = Object.assign({}, remote.settings, { googleClientId: keep.googleClientId });
+      App.state = Object.assign(App.state, remote);
+      await App.db.save({ noSync: true, keepTime: true });          // conserva la fecha de Drive: la copia no pasa a parecer "más nueva"
+      localStorage.setItem('lastPush', remote.updatedAt || ''); localStorage.setItem('remoteCount', String(App.drive.n(remote))); localStorage.setItem('syncedOnce', '1');
+      status('☁️ Datos actualizados desde Drive'); App.render(); return 'pulled';
     },
     /* Sincronización: si en Drive hay una versión más reciente que la local, se descarga; si no, se sube */
     async sync(interactive = true) {
@@ -125,20 +147,49 @@
         await ensureToken(interactive);
         await App.drive.flushPending().catch(e => console.warn(e));
         const remote = await App.drive.pull();
-        const localTs = App.state.updatedAt || '';
-        if (remote && remote.updatedAt && remote.updatedAt > localTs && remote.updatedAt !== localStorage.getItem('lastPush')) {
-          const keep = App.state.settings; remote.settings = Object.assign({}, remote.settings, { googleClientId: keep.googleClientId });
-          App.state = Object.assign(App.state, remote); await App.db.save({ noSync: true }); localStorage.setItem('lastPush', remote.updatedAt);
-          status('☁️ Datos actualizados desde Drive'); App.render(); return 'pulled';
+        if (!remote) { const r = await App.drive.push(true); return r; }   // aún no hay datos en Drive
+        const remN = App.drive.n(remote), locN = App.drive.n(App.state);
+        localStorage.setItem('remoteCount', String(remN));
+        const ask = async (msg) => interactive && await App.confirm(msg);
+        // 1) dispositivo vacío o que nunca se ha sincronizado: descargar
+        if (locN === 0 && remN > 0) return App.drive.aplicarRemoto(remote);
+        if (!localStorage.getItem('syncedOnce')) {
+          if (remN === 0) { const r = await App.drive.push(true); return r; }
+          if (await ask(`Primera sincronización de este dispositivo.\n\nDrive tiene ${App.int(remN)} movimientos (guardado el ${new Date(remote.updatedAt).toLocaleString('es-ES')}) y este dispositivo ${App.int(locN)}.\n\nAceptar = usar los datos de Drive. Cancelar = no hacer nada.`)) return App.drive.aplicarRemoto(remote);
+          status('☁️ Pendiente de sincronizar'); return 'skip';
         }
-        await App.drive.push();
-        if (App.syncDocNames) App.syncDocNames();   // renombra los PDF de movimientos corregidos sin conexión
-        return 'pushed';
+        // 2) Drive más reciente: descargar, salvo que venga vacío o mucho más pequeño
+        const localTs = App.state.updatedAt || '';
+        if (remote.updatedAt && remote.updatedAt > localTs && remote.updatedAt !== localStorage.getItem('lastPush')) {
+          const encoge = locN > 0 && (remN === 0 || (locN > 50 && remN < locN * 0.5));
+          if (!encoge) return App.drive.aplicarRemoto(remote);
+          if (await ask(`⚠️ La copia de Drive tiene ${App.int(remN)} movimientos y este dispositivo ${App.int(locN)}.\n\nAceptar = SUBIR los datos de este dispositivo a Drive (recomendado). Cancelar = no hacer nada.`)) return App.drive.push(true);
+          status('⚠️ Drive tiene menos datos que este dispositivo'); return 'blocked';
+        }
+        // 3) este dispositivo es más reciente: subir (con la protección de push)
+        let r = await App.drive.push();
+        if (r === 'blocked' && await ask(`⚠️ Este dispositivo tiene ${App.int(locN)} movimientos y Drive ${App.int(remN)}.\n\n¿Subir igualmente y SUSTITUIR los datos de Drive?`)) r = await App.drive.push(true);
+        if (r === 'pushed' && App.syncDocNames) App.syncDocNames();   // renombra los PDF de movimientos corregidos sin conexión
+        return r;
       } catch (e) { status('☁️ Sin sincronizar'); if (interactive) App.toast(e.message, 5000); return 'error'; }
     },
     scheduleSync() {
-      if (!App.state.settings.autoSync || !token) return;
+      if (!App.state.settings.autoSync || !token || !localStorage.getItem('syncedOnce')) return;
       clearTimeout(syncT); syncT = setTimeout(() => App.drive.push().catch(e => status('☁️ Error al subir')), 4000);
+    },
+
+    /* ---------- Versiones anteriores del archivo de datos (Drive las guarda unas semanas) ---------- */
+    async versiones() {
+      const { file } = await App.drive.findDataFile(); if (!file) return { file: null, revs: [] };
+      const r = await api(`files/${file.id}/revisions?fields=revisions(id,modifiedTime,size,keepForever)&pageSize=200`);
+      return { file, revs: (r.revisions || []).sort((a, b) => a.modifiedTime < b.modifiedTime ? 1 : -1) };
+    },
+    async leerVersion(fileId, revId) { const r = await api(`files/${fileId}/revisions/${revId}?alt=media`, { raw: true }); return r.json(); },
+    async conservarVersion(fileId, revId) { return api(`files/${fileId}/revisions/${revId}?fields=id,keepForever`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keepForever: true }) }); },
+    async restaurar(data) {
+      await App.db.replace(data);                                      // sustituye los datos de este dispositivo
+      localStorage.setItem('syncedOnce', '1');
+      return App.drive.push(true);                                     // y los sube a Drive como versión actual
     }
   };
 })(window.App);

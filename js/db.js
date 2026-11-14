@@ -49,7 +49,8 @@
       return !!v;
     },
     save(opts = {}) {
-      App.state.updatedAt = new Date().toISOString();
+      // keepTime: guardar sin marcar los datos como modificados (ajustes del dispositivo, datos recién descargados)
+      if (!opts.keepTime) App.state.updatedAt = new Date().toISOString();
       App.reindex();
       clearTimeout(saveT);
       if (!opts.noSync) saveSync = true;

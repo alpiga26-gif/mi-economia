@@ -17,6 +17,9 @@
           </form>
           <div class="row"><button class="btn" id="gdSave">Guardar</button><button class="btn btn-primary" id="gdCon">${App.drive.connected ? 'Reconectar' : 'Conectar con Google'}</button><button class="btn" id="gdSync">Sincronizar ahora</button>${App.drive.connected ? '<button class="btn" id="gdOff">Desconectar</button>' : ''}</div>
           ${pend ? `<div class="alert warn">${pend} documento(s) escaneados pendientes de subir a Drive. Se subirán al sincronizar.</div>` : ''}
+          <details id="verBox"><summary class="small"><b>🕘 Versiones anteriores en Drive</b> (recuperar datos)</summary>
+            <p class="small muted">Drive guarda las versiones anteriores de tus datos durante unas semanas. Pulsa "Comprobar" para ver cuántos movimientos tiene cada una y "Restaurar" para volver a ella: sustituye los datos de este dispositivo y de Drive.</p>
+            <button class="btn btn-sm" id="verList">Ver versiones</button><div id="verOut" class="mt"></div></details>
           <details><summary class="small">¿Cómo obtengo el Client ID? (una sola vez, 5 minutos)</summary><ol class="small">
             <li>Entra en <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> con tu cuenta de Google y crea un proyecto (p. ej. "Mi Economía").</li>
             <li>En <i>APIs y servicios › Biblioteca</i> habilita <b>Google Drive API</b>.</li>
@@ -48,11 +51,33 @@
       </div>`;
 
     const gd = App.$('#gd');
-    const saveGd = async () => { st.googleClientId = gd.googleClientId.value.trim(); st.carpetaFacturas = gd.carpetaFacturas.value.trim() || 'Facturas'; st.carpetaDatos = gd.carpetaDatos.value.trim() || 'MiEconomia'; st.autoSync = gd.autoSync.checked; await App.db.save({ noSync: true }); };
+    const saveGd = async () => { st.googleClientId = gd.googleClientId.value.trim(); st.carpetaFacturas = gd.carpetaFacturas.value.trim() || 'Facturas'; st.carpetaDatos = gd.carpetaDatos.value.trim() || 'MiEconomia'; st.autoSync = gd.autoSync.checked; await App.db.save({ noSync: true, keepTime: true }); };
     App.$('#gdSave').onclick = async () => { await saveGd(); App.toast('Guardado'); };
     App.$('#gdCon').onclick = async () => { await saveGd(); try { await App.drive.connect(); await App.drive.sync(); App.render(); } catch (e) { App.toast(e.message, 5000); } };
     App.$('#gdSync').onclick = async () => { await saveGd(); const r = await App.drive.sync(); if (r === 'pushed') App.toast('Datos subidos a Drive'); if (r === 'pulled') App.toast('Datos descargados de Drive'); };
     const off = App.$('#gdOff'); if (off) off.onclick = () => { App.drive.disconnect(); App.render(); };
+    App.$('#verList').onclick = async () => {
+      const out = App.$('#verOut'); out.innerHTML = '<p class="small">Consultando Drive…</p>';
+      try {
+        await saveGd(); await App.drive.connect();
+        const { file, revs } = await App.drive.versiones();
+        if (!file || !revs.length) { out.innerHTML = '<p class="small">No hay versiones guardadas.</p>'; return; }
+        out.innerHTML = App.table([{ label: 'Guardada', get: r => new Date(r.modifiedTime).toLocaleString('es-ES') }, { label: 'Tamaño', get: r => r.size ? App.int(r.size / 1024) + ' KB' : '' },
+          { label: 'Movimientos', html: r => `<span data-n="${r.id}">—</span>` }, { label: '', html: r => `<button class="btn btn-sm" data-chk="${r.id}">Comprobar</button> <button class="btn btn-sm btn-primary" data-res="${r.id}" disabled>Restaurar</button>` }], revs, { sortable: false });
+        const cache = {};
+        out.querySelectorAll('[data-chk]').forEach(b => b.onclick = async () => {
+          const id = b.dataset.chk; b.disabled = true; b.textContent = '…';
+          try { const d = cache[id] = await App.drive.leerVersion(file.id, id); out.querySelector(`[data-n="${id}"]`).textContent = App.int(App.drive.n(d)) + ' · plantillas ' + (d.plantillas || []).length; out.querySelector(`[data-res="${id}"]`).disabled = !App.drive.n(d); b.textContent = 'Comprobada'; }
+          catch (e) { b.textContent = 'Error'; App.toast(e.message, 5000); }
+        });
+        out.querySelectorAll('[data-res]').forEach(b => b.onclick = async () => {
+          const d = cache[b.dataset.res]; if (!d) return;
+          if (!(await App.confirm(`Restaurar la versión con ${App.int(App.drive.n(d))} movimientos. Sustituirá los datos de este dispositivo y de Drive. ¿Continuar?`))) return;
+          try { await App.drive.conservarVersion(file.id, b.dataset.res).catch(() => {}); const r = await App.drive.restaurar(d); App.updateBadge(); App.toast(r === 'pushed' ? `Restaurados ${App.int(App.drive.n(d))} movimientos y subidos a Drive` : 'Restaurado en este dispositivo', 6000); App.go('dashboard'); }
+          catch (e) { App.toast('Error al restaurar: ' + e.message, 6000); }
+        });
+      } catch (e) { out.innerHTML = `<div class="alert bad small">${App.esc(e.message)}</div>`; }
+    };
 
     App.$('#impJson').onchange = async (e) => {
       const f = e.target.files[0]; if (!f) return;
