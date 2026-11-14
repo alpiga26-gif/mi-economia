@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c5cab">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mi Economía">
+<title>Mi Economía</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-btn only-mobile" id="btnMenu" aria-label="Menú">☰</button>
+  <div class="brand"><img src="icons/icon.svg" alt=""><span>Mi Economía</span></div>
+  <div class="topbar-actions">
+    <span id="syncStatus" class="sync-status" title="Estado de sincronización con Google Drive"></span>
+    <button class="btn btn-primary" id="btnQuickScan" title="Escanear factura o ticket">📷 <span class="hide-xs">Escanear</span></button>
+  </div>
+</header>
+<div class="layout">
+  <nav class="sidenav" id="sidenav">
+    <a href="#/dashboard" data-route="dashboard">📊 <span>Dashboard</span></a>
+    <a href="#/movimientos" data-route="movimientos">📒 <span>Movimientos</span></a>
+    <a href="#/revisar" data-route="revisar">✅ <span>Revisar</span> <b class="badge" id="badgeRevisar"></b></a>
+    <a href="#/captura" data-route="captura">📷 <span>Escanear / Importar</span></a>
+    <a href="#/informes" data-route="informes">📑 <span>Informes</span></a>
+    <a href="#/proyeccion" data-route="proyeccion">🔮 <span>Proyección</span></a>
+    <a href="#/maestro" data-route="maestro">🗂️ <span>Maestro</span></a>
+    <a href="#/calidad" data-route="calidad">⚠️ <span>Calidad de datos</span> <b class="badge" id="badgeCalidad"></b></a>
+    <a href="#/ajustes" data-route="ajustes">⚙️ <span>Ajustes y Drive</span></a>
+  </nav>
+  <main id="view" class="view" tabindex="-1"></main>
+</div>
+<nav class="bottomnav only-mobile">
+  <a href="#/dashboard" data-route="dashboard"><i>📊</i>Inicio</a>
+  <a href="#/movimientos" data-route="movimientos"><i>📒</i>Movs.</a>
+  <a href="#/captura" data-route="captura" class="fab"><i>📷</i></a>
+  <a href="#/revisar" data-route="revisar"><i>✅</i>Revisar</a>
+  <a href="#/maestro" data-route="maestro"><i>🗂️</i>Maestro</a>
+</nav>
+<div id="modal" class="modal" hidden><div class="modal-card" role="dialog" aria-modal="true"><div id="modalBody"></div></div></div>
+<div id="toast" class="toast" hidden></div>
+<div id="tooltip" class="chart-tip" hidden></div>
+
+<script src="js/core.js"></script>
+<script src="js/db.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/export.js"></script>
+<script src="js/desglose.js"></script>
+<script src="js/drive.js"></script>
+<script src="js/view-dashboard.js"></script>
+<script src="js/view-movimientos.js"></script>
+<script src="js/view-captura.js"></script>
+<script src="js/entrada.js"></script>
+<script src="js/view-revisar.js"></script>
+<script src="js/view-informes.js"></script>
+<script src="js/view-proyeccion.js"></script>
+<script src="js/view-maestro.js"></script>
+<script src="js/view-calidad.js"></script>
+<script src="js/view-ajustes.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
