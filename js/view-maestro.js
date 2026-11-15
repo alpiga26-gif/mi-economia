@@ -31,7 +31,21 @@
         if (!o[def.key] || (coll === 'reglas' && !o.texto)) return App.toast(coll === 'reglas' ? 'Indica el texto que debe contener el concepto' : 'El código es obligatorio');
         const arr = App.state[coll] = App.state[coll] || [];
         if ((isNew || o[def.key] !== oldKey) && arr.some(x => x[def.key] === o[def.key])) return App.toast('Ya existe ese código');
-        if (isNew) arr.push(o); else { Object.assign(it, o); if (def.movField && oldKey !== o[def.key]) App.state.movimientos.forEach(m => { if (m[def.movField] === oldKey) m[def.movField] = o[def.key]; }); }
+        if (isNew) arr.push(o); else {
+          Object.assign(it, o);
+          if (def.movField && oldKey !== o[def.key]) {
+            const nuevo = o[def.key], f = def.movField;
+            App.state.movimientos.forEach(m => { if (m[f] === oldKey) m[f] = nuevo; });
+            // el cambio de código llega también a plantillas, reglas y préstamos vinculados
+            (App.state.plantillas || []).forEach(t => {
+              [t.cabecera, ...(t.lineas || [])].forEach(l => { if (l && l[f] === oldKey) l[f] = nuevo; });
+              if (coll === 'prestamos' && t.prestamo === oldKey) t.prestamo = nuevo;
+              if (coll === 'cuentas' && t.match && t.match.cuenta === oldKey) t.match.cuenta = nuevo;
+            });
+            (App.state.reglas || []).forEach(r => { if (r[f] === oldKey) r[f] = nuevo; if (coll === 'cuentas' && r.cuenta === oldKey) r.cuenta = nuevo; });
+            if (coll === 'bienes') App.state.prestamos.forEach(p => { if (p.bien === oldKey) p.bien = nuevo; });
+          }
+        }
         await App.db.save(); close(); App.toast('Guardado'); (after || App.render)();
       };
       const d = el.querySelector('#del'); if (d) d.onclick = async () => {
