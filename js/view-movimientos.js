@@ -76,6 +76,13 @@
     const S = App.state;
     const f = { ym: p.mes || '', desde: p.desde || '', hasta: p.hasta || '', cuenta: p.cuenta || '', area: p.area || '', tipo: p.tipo || '', categoria: p.categoria || '', texto: p.q || '', activo: p.activo || '' };
     if (!f.ym && !f.desde && !f.hasta && !f.texto && !p.todo) f.ym = App.defaultMonth();
+    // Jerarquía: con un mes elegido, "Desde/Hasta" solo pueden moverse dentro de ese mes; sin mes, son libres
+    const lim = f.ym ? { min: f.ym + '-01', max: App.endOfMonth(f.ym) } : { min: '', max: '' };
+    if (f.ym) {
+      if (f.desde && (f.desde < lim.min || f.desde > lim.max)) f.desde = '';
+      if (f.hasta && (f.hasta < lim.min || f.hasta > lim.max)) f.hasta = '';
+    }
+    if (f.desde && f.hasta && f.desde > f.hasta) [f.desde, f.hasta] = [f.hasta, f.desde];
     const movs = App.filterMovs(f).slice().reverse();
     const s = App.summarize(movs);
     const LIMIT = 400;
@@ -85,9 +92,9 @@
       <div class="page-head"><h1>Movimientos</h1>
         <div class="actions"><button class="btn btn-primary" id="nuevo">＋ Nuevo</button><button class="btn" id="xls">⬇️ Excel</button><button class="btn" id="pdf">⬇️ PDF</button></div></div>
       <form class="filters card" id="flt">
-        <label class="f">Mes<select name="mes"><option value="">—</option>${months.map(m => `<option value="${m}" ${m === f.ym ? 'selected' : ''}>${App.monthName(m)}</option>`).join('')}</select></label>
-        <label class="f">Desde<input type="date" name="desde" value="${f.desde}"></label>
-        <label class="f">Hasta<input type="date" name="hasta" value="${f.hasta}"></label>
+        <label class="f">Mes<select name="mes"><option value="">— (fechas libres)</option>${months.map(m => `<option value="${m}" ${m === f.ym ? 'selected' : ''}>${App.monthName(m)}</option>`).join('')}</select></label>
+        <label class="f"><span>Desde <span class="muted" id="fDesdeAyuda">${f.ym ? '(dentro del mes)' : ''}</span></span><input type="date" name="desde" value="${f.desde}" min="${lim.min}" max="${f.hasta || lim.max}"></label>
+        <label class="f"><span>Hasta <span class="muted" id="fHastaAyuda">${f.ym ? '(dentro del mes)' : ''}</span></span><input type="date" name="hasta" value="${f.hasta}" min="${f.desde || lim.min}" max="${lim.max}"></label>
         <label class="f">Cuenta<select name="cuenta">${opts(S.cuentas, f.cuenta, c => c.id, c => c.id, 'Todas')}</select></label>
         <label class="f">Área<select name="area">${opts(S.areas, f.area, a => a.nombre, a => a.id, 'Todas')}</select></label>
         <label class="f">Tipo<select name="tipo">${opts(S.tipos, f.tipo, t => t.nombre, t => t.id, 'Todos')}</select></label>
@@ -111,6 +118,15 @@
 
     App.$('#flt').onsubmit = (e) => { e.preventDefault(); const q = new URLSearchParams(); new FormData(e.target).forEach((v, k) => v && q.set(k, v)); if (![...q.keys()].length) q.set('todo', 1); App.go('movimientos?' + q.toString()); };
     App.$('#clr').onclick = () => App.go('movimientos?todo=1');
+    // Al cambiar el mes, las fechas Desde/Hasta quedan acotadas a ese mes (o libres si el mes se deja vacío)
+    const fm = App.$('#flt'), selMes = fm.mes, iDesde = fm.desde, iHasta = fm.hasta;
+    const acotar = () => {
+      const ym = selMes.value, min = ym ? ym + '-01' : '', max = ym ? App.endOfMonth(ym) : '';
+      [iDesde, iHasta].forEach(i => { if (i.value && ym && (i.value < min || i.value > max)) i.value = ''; });
+      iDesde.min = min; iDesde.max = iHasta.value || max; iHasta.min = iDesde.value || min; iHasta.max = max;
+      App.$('#fDesdeAyuda').textContent = App.$('#fHastaAyuda').textContent = ym ? '(dentro del mes)' : '';
+    };
+    selMes.onchange = acotar; iDesde.onchange = acotar; iHasta.onchange = acotar;
     App.$('#nuevo').onclick = () => App.editMov(null);
     App.$$('tr[data-id]').forEach(tr => tr.onclick = () => App.editMov(tr.dataset.id));
     const desc = [f.ym && App.monthName(f.ym), f.desde && 'desde ' + App.fdate(f.desde), f.hasta && 'hasta ' + App.fdate(f.hasta), f.cuenta, f.area && App.areaName(f.area), f.categoria, f.texto && `"${f.texto}"`].filter(Boolean).join(' · ') || 'Todos';
