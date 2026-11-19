@@ -28,6 +28,7 @@
     r.cuentas = 0;
     (cfg.cuentas || []).forEach(c => { const x = App.cuentaOf(c.id); if (x) Object.entries(c).forEach(([k, v]) => { if (k !== 'id' && (x[k] == null || x[k] === '')) { x[k] = v; r.cuentas++; } }); });
     if (cfg.socioPropio && !S.settings.socioPropio) S.settings.socioPropio = cfg.socioPropio;
+    if (cfg.agrupRepartoRecibido && !S.settings.agrupRepartoRecibido) S.settings.agrupRepartoRecibido = cfg.agrupRepartoRecibido;
     (cfg.reglas || []).forEach(g => { S.reglas = S.reglas || []; if (g && g.texto && !S.reglas.some(x => App.norm(x.texto) === App.norm(g.texto))) S.reglas.push({ id: App.uid('R'), ...g }); });
     await App.db.save();
     return r;

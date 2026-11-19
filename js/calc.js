@@ -256,6 +256,32 @@
       add('actividad-traspasos', 'alta', 'Movimientos entre la actividad compartida y tus cuentas registrados como traspaso',
         'La actividad compartida no es solo tuya: lo que sale de ella hacia ti es un reparto (ingreso tuyo, gasto de la actividad) y lo que pones tú es una aportación (gasto tuyo, ingreso de la actividad). Corregir: tu lado pasa a Ingreso/Gasto "Olivar : Reparto recibido / Aportación" y el lado de la actividad a "Reparto / Aportación de socio".',
         grupos, { fix: 'actividadSocio' });
+
+      // Gasto tuyo pagado desde la cuenta compartida: cargo del banco = reparto a ti (área de la actividad) + dos apuntes
+      // tuyos en la misma cuenta y fecha (+ ingreso por el reparto, − el gasto). Se revisa que no falten ni estén en otra fecha.
+      const socio = (App.state.settings.socioPropio || '').toLowerCase();
+      if (socio) {
+        const usadosPar = new Set(), sinPar = [];
+        const propios = mv.filter(m => App.cuentaCompartida(m.cuenta) && !App.esCompartido(m) && m.saldo == null);
+        mv.filter(m => App.esCompartido(m) && m.tipo === 'G' && (+m.importe) < 0 && (m.agrup || '').toLowerCase() === 'rep:' + socio && m.saldo != null).forEach(c => {
+          const imp = Math.abs(+c.importe), d0 = new Date(c.fecha);
+          // primero el importe exacto; si no, uno casi igual (p. ej. 395 en vez de 395,15: error al teclear)
+          const cand = (signo, tol) => propios.filter(x => !usadosPar.has(x.id) && x.cuenta === c.cuenta && Math.abs(Math.abs(+x.importe) - imp) < tol && Math.sign(+x.importe) === signo && Math.abs(new Date(x.fecha) - d0) <= 5 * 864e5)
+            .sort((a, b) => Math.abs(Math.abs(+a.importe) - imp) - Math.abs(Math.abs(+b.importe) - imp) || Math.abs(new Date(a.fecha) - d0) - Math.abs(new Date(b.fecha) - d0))[0];
+          const mas = cand(1, 0.01) || cand(1, Math.max(1, imp * 0.01)), menos = cand(-1, 0.01) || cand(-1, Math.max(1, imp * 0.01));
+          if (mas && menos) {
+            usadosPar.add(mas.id); usadosPar.add(menos.id);
+            const malImporte = Math.abs(Math.abs(+mas.importe) - imp) >= 0.01 || Math.abs(Math.abs(+menos.importe) - imp) >= 0.01;
+            if (malImporte) sinPar.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${App.num(c.importe)}`, n: 3, importe: c.importe, ejemplo: `Los apuntes tuyos son de ${App.num(Math.abs(mas.importe))} / ${App.num(Math.abs(menos.importe))} y el cargo del banco de ${App.num(imp)} · ${c.concepto}`, movs: [c, mas, menos], caso: 'importe' });
+            else if (mas.fecha !== c.fecha || menos.fecha !== c.fecha) sinPar.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${App.num(c.importe)}`, n: 3, importe: c.importe, ejemplo: `Los apuntes tuyos están el ${App.fdate(mas.fecha)}, el cargo del banco el ${App.fdate(c.fecha)} · ${c.concepto}`, movs: [c, mas, menos], caso: 'fecha' });
+          } else if (!mv.some(x => x.tipo === 'T' && !App.cuentaCompartida(x.cuenta) && Math.abs((+x.importe) - imp) < 0.02 && Math.abs(new Date(x.fecha) - d0) <= 7 * 864e5)) {
+            sinPar.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${App.num(c.importe)}`, n: 1, importe: c.importe, ejemplo: `Reparto a ${App.state.settings.socioPropio} sin los apuntes tuyos (+ ingreso / − gasto) · ${c.concepto}`, movs: [c], caso: 'falta' });
+          }
+        });
+        add('reparto-gasto-propio', 'media', 'Gastos tuyos pagados desde la cuenta compartida sin sus dos apuntes particulares',
+          'Cuando la actividad paga un gasto tuyo, el cargo del banco es un reparto a ti y se acompaña de dos apuntes tuyos en la misma cuenta y fecha: + ingreso (reparto recibido) y − el gasto. Si faltan, ese gasto no aparece en tu economía; si están en otra fecha, conviene igualarla.',
+          sinPar, { fix: 'parPersonal' });
+      }
     }
 
     // Transferencias / traspasos clasificados como ingreso o gasto (sin contar los repartos/aportaciones de la actividad compartida)
@@ -265,7 +291,8 @@
       Object.entries(groupCount(traMal, m => m.tipo + ' · ' + m.agrup)).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ code: k, n: v.length, importe: R(v.reduce((a, m) => a + m.importe, 0)), ejemplo: v[0].concepto, movs: v })));
 
     // Duplicados
-    const dups = Object.values(groupCount(mv, m => App.dupKey(m))).filter(g => g.length > 1);
+    // (se distinguen por área y categoría: el reparto y el gasto propio del mismo cargo no son duplicados)
+    const dups = Object.values(groupCount(mv, m => App.dupKey(m) + '|' + (m.area || '') + '|' + (m.agrup || '') + '|' + (m.tipo || ''))).filter(g => g.length > 1);
     const dupSeguro = dups.filter(g => new Set(g.map(m => m.saldo)).size < g.length && g.some(m => m.saldo != null));
     const dupPosible = dups.filter(g => !dupSeguro.includes(g));
     add('duplicados', 'alta', 'Movimientos duplicados (misma cuenta, fecha, importe, concepto y mismo saldo)',

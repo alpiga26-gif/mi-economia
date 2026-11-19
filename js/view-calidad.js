@@ -67,11 +67,27 @@
         asegurarCat(m.agrup, entra ? 'Aportación socio' : 'Reparto', socio);
       } else {                            // tu lado: de la actividad → ingreso; a la actividad → gasto
         const a = it.movs.find(x => App.esCompartido(x)); const ar = a ? area(a) : 'O';
-        m.tipo = entra ? 'I' : 'G'; m.area = ar; m.agrup = entra ? 'Oli:Rep' : 'Oli:Apo';
+        m.tipo = entra ? 'I' : 'G'; m.area = ar; m.agrup = entra ? (App.state.settings.agrupRepartoRecibido || 'Oli:Rep') : 'Oli:Apo';
         asegurarCat(m.agrup, nomArea(ar), entra ? 'Reparto recibido' : 'Aportación');
       }
       m.estado = m.estado === 'AR' ? 'AR' : 'R';
     });
+  };
+
+  /* Gasto propio pagado desde la cuenta compartida: crea (o pone en la fecha del cargo) los dos apuntes tuyos */
+  App.corregirParPersonal = async (it) => {
+    const [c, mas, menos] = it.movs;
+    if (it.caso === 'fecha') { mas.fecha = c.fecha; menos.fecha = c.fecha; return; }
+    if (it.caso === 'importe') { const imp = Math.abs(+c.importe); mas.importe = imp; menos.importe = -imp; mas.fecha = c.fecha; menos.fecha = c.fecha; return; }
+    const imp = Math.abs(+c.importe), cl = App.norm(c.concepto).slice(0, 15);
+    // copia la clasificación del último par igual (mismo importe y concepto parecido) de esa cuenta
+    const prev = App.state.movimientos.filter(x => x.cuenta === c.cuenta && App.cuentaCompartida(x.cuenta) && !App.esCompartido(x) && Math.abs(Math.abs(+x.importe) - imp) < 0.01 && App.norm(x.concepto).slice(0, 15) === cl)
+      .sort((a, b) => a.fecha < b.fecha ? 1 : -1);
+    const pMas = prev.find(x => +x.importe > 0), pMenos = prev.find(x => +x.importe < 0);
+    const base = { fecha: c.fecha, fechaValor: c.fechaValor, cuenta: c.cuenta, concepto: c.concepto, saldo: null };
+    const ingreso = { ...base, importe: imp, tipo: 'I', area: pMas?.area || 'P', agrup: pMas?.agrup || App.state.settings.agrupRepartoRecibido || 'Oli:Rep', activo: pMas?.activo || '', beneficiario: pMas?.beneficiario || '', estado: 'R', obs: 'Reparto recibido de la actividad compartida' };
+    const gasto = { ...base, importe: -imp, tipo: 'G', area: pMenos?.area || 'P', agrup: pMenos?.agrup || '', activo: pMenos?.activo || '', beneficiario: pMenos?.beneficiario || '', estado: pMenos ? 'R' : 'P', obs: 'Gasto propio pagado desde la cuenta compartida' };
+    await App.addMovs([ingreso, gasto]);
   };
 
   App.views.calidad = (el) => {
@@ -113,6 +129,10 @@
       const [k, j] = b.dataset.fix.split(':').map(Number); const is = issues[k], it = is.items[j];
       const after = () => App.render();
       if (is.fix === 'crearAgrup') return App.editMaster('categorias', null, after, propuestaCategoria(it.code));
+      if (is.fix === 'parPersonal') {
+        if (!(await App.confirm(it.caso === 'fecha' ? `¿Poner los dos apuntes tuyos en la fecha del cargo (${App.fdate(it.movs[0].fecha)})?` : it.caso === 'importe' ? `¿Poner los dos apuntes tuyos con el importe del cargo del banco (${App.num(Math.abs(it.importe))} €)?` : `¿Crear los dos apuntes tuyos (+${App.num(Math.abs(it.importe))} ingreso y −${App.num(Math.abs(it.importe))} gasto) para el cargo del ${App.fdate(it.movs[0].fecha)}?`))) return;
+        await App.corregirParPersonal(it); await App.db.save(); App.toast('Corregido'); return after();
+      }
       if (is.fix === 'actividadSocio') {
         if (!(await App.confirm(`¿Convertir en reparto/aportación (ingreso o gasto) estos ${it.n} movimiento(s)?\n\n${it.movs.map(m => `${App.fdate(m.fecha)} ${m.cuenta} ${App.num(m.importe)}`).join('\n')}`))) return;
         App.corregirActividad(it); await App.db.save(); App.toast('Corregido'); return after();
@@ -143,7 +163,7 @@
     App.updateBadge();
   };
   function fixBtn(is, it, k, j) {
-    const label = { crearAgrup: 'Crear en maestro', crearArea: 'Crear área', crearTipo: 'Crear tipo', crearBien: 'Crear bien', borrarDuplicados: 'Quitar copias', actividadSocio: 'Corregir', unificarAgrup: 'Unificar', unificarCuenta: it.maestro ? 'Unificar' : 'Crear cuenta' }[is.fix];
+    const label = { crearAgrup: 'Crear en maestro', crearArea: 'Crear área', crearTipo: 'Crear tipo', crearBien: 'Crear bien', borrarDuplicados: 'Quitar copias', actividadSocio: 'Corregir', parPersonal: it.caso === 'fecha' ? 'Igualar fecha' : it.caso === 'importe' ? 'Corregir importe' : 'Crear apuntes', unificarAgrup: 'Unificar', unificarCuenta: it.maestro ? 'Unificar' : 'Crear cuenta' }[is.fix];
     return label ? `<button class="btn btn-sm" data-fix="${k}:${j}">${label}</button>` : '';
   }
 })(window.App);
