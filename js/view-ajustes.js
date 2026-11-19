@@ -43,6 +43,7 @@
             <label class="f" style="grid-column:1/-1">Titulares (nombres que aparecen en los recibos y no son el proveedor), separados por comas<input name="titulares" value="${App.esc((st.titulares || []).join(', '))}"></label>
             <label class="f">Tu código como socio en la actividad compartida (p. ej. tus iniciales)<input name="socioPropio" value="${App.esc(st.socioPropio || '')}"></label>
             <label class="f">Días de desfase admitidos en traspasos entre bancos<input type="number" name="desfaseTraspasos" min="0" max="15" value="${st.desfaseTraspasos ?? 3}" title="Una transferencia puede aparecer 1-2 días después en el otro banco (3 si hay fin de semana). Dentro de ese margen no se avisa."></label>
+            <label class="f">Palabras que indican descuento (gasto en positivo admitido)<input name="palabrasDescuento" value="${App.esc(st.palabrasDescuento ?? 'dto, descuento')}" title="Separadas por comas. Un gasto positivo cuyo concepto u observaciones contenga alguna de estas palabras es un descuento (menor gasto) y no se avisa en Calidad."></label>
           </form><button class="btn" id="prefSave" style="align-self:flex-start">Guardar preferencias</button>
         </div>
         <div class="card stack"><h2>ℹ️ Datos en este dispositivo</h2>
@@ -103,7 +104,7 @@
         App.toast(`Configuración importada: ${r.plantillas} plantillas nuevas, ${r.titulares} titulares, ${r.prestamos} datos de préstamos, ${r.cuentas} datos de cuentas`, 5000); App.render();
       } catch (err) { App.toast('Error: ' + err.message, 5000); }
     };
-    App.$('#prefSave').onclick = async () => { const p = App.$('#pref'); st.tema = p.tema.value; st.umbralSimilitud = +p.umbralSimilitud.value || 60; st.titulares = p.titulares.value.split(',').map(s => s.trim()).filter(Boolean); st.socioPropio = p.socioPropio.value.trim(); st.desfaseTraspasos = Math.max(0, +p.desfaseTraspasos.value || 0); await App.db.save(); App.applyTheme(); App.toast('Preferencias guardadas'); App.render(); };
+    App.$('#prefSave').onclick = async () => { const p = App.$('#pref'); st.tema = p.tema.value; st.umbralSimilitud = +p.umbralSimilitud.value || 60; st.titulares = p.titulares.value.split(',').map(s => s.trim()).filter(Boolean); st.socioPropio = p.socioPropio.value.trim(); st.desfaseTraspasos = Math.max(0, +p.desfaseTraspasos.value || 0); st.palabrasDescuento = p.palabrasDescuento.value.trim(); await App.db.save(); App.applyTheme(); App.toast('Preferencias guardadas'); App.render(); };
     App.$('#wipe').onclick = async () => { if (await App.confirm('Se borrarán todos los datos guardados en este dispositivo (no los de Drive). ¿Continuar?')) { const keep = st.googleClientId; await App.db.replace({ movimientos: [], categorias: [], settings: { googleClientId: keep } }); App.go('dashboard'); } };
   };
 })(window.App);

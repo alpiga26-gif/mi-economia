@@ -232,9 +232,13 @@
 
     // Signo
     // Los movimientos AR son desgloses (el cargo original se compensa con un apunte de signo contrario y se reparte en varias partidas): no se revisa su signo
-    const signo = mv.filter(m => m.estado !== 'AR' && ((m.tipo === 'G' && m.importe > 0) || (m.tipo === 'I' && m.importe < 0)));
+    // Un gasto positivo cuyo concepto/observaciones indique descuento (p. ej. "Dto fidelización" de Vodafone) es un menor gasto legítimo: no se avisa
+    const palDto = String(App.state.settings.palabrasDescuento ?? 'dto, descuento').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+      .map(p => new RegExp('(^|[^a-záéíóúñ])' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+    const esDescuento = (m) => m.tipo === 'G' && m.importe > 0 && palDto.some(re => re.test((m.concepto || '') + ' ' + (m.obs || '')));
+    const signo = mv.filter(m => m.estado !== 'AR' && ((m.tipo === 'G' && m.importe > 0) || (m.tipo === 'I' && m.importe < 0)) && !esDescuento(m));
     add('signo', 'media', 'Importe con signo contrario al tipo (gasto positivo o ingreso negativo)',
-      'Excluidos los desgloses (Estado AR). Pueden ser devoluciones o abonos legítimos (se netean en la categoría), o errores de tipo.',
+      'Excluidos los desgloses (Estado AR) y los descuentos (gasto positivo cuyo concepto contiene las palabras de Ajustes › Preferencias, p. ej. "Dto"). Pueden ser devoluciones o abonos legítimos (se netean en la categoría), o errores de tipo.',
       Object.entries(groupCount(signo, m => m.tipo + ' · ' + m.agrup)).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ code: k, n: v.length, importe: R(v.reduce((a, m) => a + m.importe, 0)), ejemplo: v[0].concepto, movs: v })));
 
     // Desgloses AR: la suma de los apuntes AR de cada cuenta y día debe ser 0
