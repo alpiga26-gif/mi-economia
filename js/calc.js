@@ -247,12 +247,17 @@
     // Actividad compartida: el dinero que entra o sale de ella hacia tus cuentas es ingreso o gasto, no traspaso
     if (App.hayCompartidas()) {
       const T = mv.filter(m => m.tipo === 'T' && m.importe), usados = new Set(), grupos = [];
-      T.filter(m => App.esCompartido(m)).forEach(c => {
-        const d0 = new Date(c.fecha);
-        const p = T.find(x => !usados.has(x.id) && !App.esCompartido(x) && !App.cuentaCompartida(x.cuenta) && Math.abs((+x.importe) + (+c.importe)) < 0.02 && Math.abs(new Date(x.fecha) - d0) <= 7 * 864e5);
-        if (p) { usados.add(p.id); usados.add(c.id); grupos.push({ code: `${p.cuenta} ⇄ ${c.cuenta} ${App.fdate(c.fecha)}`, n: 2, importe: p.importe, ejemplo: `${p.concepto} ⟷ ${c.concepto}`, movs: [p, c], par: true }); }
-        else if (/^rep:/i.test(c.agrup || '')) grupos.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${c.agrup}`, n: 1, importe: c.importe, ejemplo: c.concepto, movs: [c], par: false });
+      const margen = (+App.state.settings.desfaseTraspasos || 3) + 4;   // aquí algo más amplio: retiradas de efectivo que se apuntan días después
+      // parejas posibles ordenadas por cercanía en fecha (la más cercana primero)
+      const parejas = [];
+      T.filter(m => App.esCompartido(m)).forEach(c => T.forEach(x => {
+        if (!App.esCompartido(x) && !App.cuentaCompartida(x.cuenta) && Math.abs((+x.importe) + (+c.importe)) < 0.02) { const d = Math.abs(new Date(x.fecha) - new Date(c.fecha)) / 864e5; if (d <= margen) parejas.push({ c, p: x, d }); }
+      }));
+      parejas.sort((a, b) => a.d - b.d).forEach(({ c, p }) => {
+        if (usados.has(c.id) || usados.has(p.id)) return;
+        usados.add(p.id); usados.add(c.id); grupos.push({ code: `${p.cuenta} ⇄ ${c.cuenta} ${App.fdate(c.fecha)}`, n: 2, importe: p.importe, ejemplo: `${p.concepto} ⟷ ${c.concepto}`, movs: [p, c], par: true });
       });
+      T.filter(m => App.esCompartido(m) && !usados.has(m.id) && /^rep:/i.test(m.agrup || '')).forEach(c => grupos.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${c.agrup}`, n: 1, importe: c.importe, ejemplo: c.concepto, movs: [c], par: false }));
       add('actividad-traspasos', 'alta', 'Movimientos entre la actividad compartida y tus cuentas registrados como traspaso',
         'La actividad compartida no es solo tuya: lo que sale de ella hacia ti es un reparto (ingreso tuyo, gasto de la actividad) y lo que pones tú es una aportación (gasto tuyo, ingreso de la actividad). Corregir: tu lado pasa a Ingreso/Gasto "Olivar : Reparto recibido / Aportación" y el lado de la actividad a "Reparto / Aportación de socio".',
         grupos, { fix: 'actividadSocio' });
@@ -316,27 +321,40 @@
       'Se compara, día a día, el saldo final del extracto con el saldo anterior más los movimientos del día. La columna "Importe" indica el descuadre.',
       saltos);
 
-    // Traspasos sin contrapartida
-    const T = mv.filter(m => m.tipo === 'T'); const used = new Set(); const huerf = [];
-    // Las tarjetas registran el ingreso en la fecha de liquidación (hasta ~45 días después del cargo en cuenta)
+    // Traspasos sin contrapartida. Entre bancos es normal un desfase de 1-2 días (3 con fin de semana): dentro de ese
+    // margen se empareja sin avisar. Se emparejan primero los más cercanos en fecha (así, con varios importes iguales
+    // en días seguidos, ninguno "roba" la pareja de otro). Las tarjetas abonan en la liquidación (hasta 45 días).
+    const desfase = +App.state.settings.desfaseTraspasos || 3;
     const esTarjeta = (c) => App.cuentaGrupo(App.cuentaOf(c)) === 'Tarjetas' || /^tc/i.test(c || '');
     const dias = (a, b) => Math.abs(new Date(a.fecha) - new Date(b.fecha)) / 864e5;
-    T.forEach(m => {
-      if (used.has(m.id) || !(+m.importe)) return;
-      let best = null;
-      T.forEach(x => {
-        if (used.has(x.id) || x.id === m.id || x.cuenta === m.cuenta || Math.abs((+x.importe) + (+m.importe)) >= 0.02) return;
-        const d = dias(m, x), max = esTarjeta(m.cuenta) || esTarjeta(x.cuenta) ? 45 : 7;
-        if (d <= max && (!best || d < best.d)) best = { x, d };
-      });
-      if (best) { used.add(m.id); used.add(best.x.id); } else huerf.push(m);
+    const T = mv.filter(m => m.tipo === 'T' && +m.importe);
+    const porImporte = {}; mv.forEach(x => { if (+x.importe && !x.desgloseDe) (porImporte[Math.round(Math.abs(+x.importe) * 100)] = porImporte[Math.round(Math.abs(+x.importe) * 100)] || []).push(x); });
+    const cands = [];
+    T.forEach(m => (porImporte[Math.round(Math.abs(+m.importe) * 100)] || []).forEach(x => {
+      if (x.id === m.id || x.cuenta === m.cuenta || Math.abs((+x.importe) + (+m.importe)) >= 0.02) return;
+      // el margen largo de tarjeta solo vale para liquidaciones (traspaso con traspaso); con otros tipos, el desfase normal
+      const d = dias(m, x), max = (esTarjeta(m.cuenta) || esTarjeta(x.cuenta)) && x.tipo === 'T' ? 45 : desfase;
+      if (d <= max) cands.push({ m, x, d, sc: d + (x.tipo === 'T' ? 0 : 0.5) });   // a igual distancia, mejor otro traspaso
+    }));
+    cands.sort((a, b) => a.sc - b.sc);
+    const used = new Set(), otroTipo = [];
+    cands.forEach(({ m, x, d }) => {
+      if (used.has(m.id) || used.has(x.id)) return;
+      used.add(m.id); used.add(x.id);
+      // pareja de otro tipo: si toca la actividad compartida ya lo revisa su propio aviso; si no, se informa aparte
+      if (x.tipo !== 'T' && !App.cuentaCompartida(m.cuenta) && !App.cuentaCompartida(x.cuenta))
+        otroTipo.push({ code: `${m.cuenta} ⇄ ${x.cuenta} ${App.fdate(m.fecha)}`, n: 2, importe: m.importe, ejemplo: `Traspaso en ${m.cuenta}; en ${x.cuenta} está como ${x.tipo} ${x.agrup || ''}${d ? ` (${Math.round(d)} día${Math.round(d) > 1 ? 's' : ''} de desfase)` : ''}`, movs: [m, x] });
     });
+    const huerf = T.filter(m => !used.has(m.id));
     add('traspasos', 'baja', 'Traspasos (tipo T) sin movimiento opuesto en otra cuenta',
-      'Un traspaso entre cuentas propias debería aparecer dos veces (sale de una y entra en otra). Si la otra cuenta no está registrada, el saldo global queda descuadrado.',
+      `Un traspaso entre cuentas propias debería aparecer dos veces (sale de una y entra en otra). Se admite un desfase de hasta ${desfase} días entre bancos (45 en tarjetas). Si la otra cuenta no está registrada, el saldo global queda descuadrado.`,
       huerf.map(m => {
-        const c = mv.find(x => x.id !== m.id && x.cuenta !== m.cuenta && x.tipo !== 'T' && Math.abs((+x.importe) + (+m.importe)) < 0.02 && dias(m, x) <= 15);
-        return { code: `${m.cuenta} ${App.fdate(m.fecha)} · ${m.agrup}`, n: 1, importe: m.importe, ejemplo: m.concepto + (c ? ` ⟶ posible contrapartida: ${c.cuenta} ${App.fdate(c.fecha)} tipo ${c.tipo} ${c.agrup}` : ''), movs: [m] };
+        const c = mv.find(x => x.id !== m.id && x.cuenta !== m.cuenta && Math.abs((+x.importe) + (+m.importe)) < 0.02 && dias(m, x) <= 15);
+        return { code: `${m.cuenta} ${App.fdate(m.fecha)} · ${m.agrup}`, n: 1, importe: m.importe, ejemplo: m.concepto + (c ? ` ⟶ posible contrapartida (${Math.round(dias(m, c))} días): ${c.cuenta} ${App.fdate(c.fecha)} tipo ${c.tipo} ${c.agrup}` : ''), movs: [m] };
       }));
+    add('traspasos-otro-tipo', 'baja', 'Traspasos cuya contrapartida está registrada con otro tipo',
+      'La pareja existe (dentro del desfase admitido), pero en una cuenta es traspaso y en la otra ingreso o gasto. Si el dinero solo se movió entre tus cuentas, ambos lados deberían ser T.',
+      otroTipo);
     const ceros = mv.filter(m => m.importe == null || +m.importe === 0);
     add('importe-cero', 'baja', 'Movimientos con importe vacío o 0', 'No afectan a los saldos; probablemente sobran o falta teclear el importe.',
       ceros.map(m => ({ code: `${m.cuenta} ${App.fdate(m.fecha)} · ${m.agrup}`, n: 1, importe: m.importe, ejemplo: m.concepto, movs: [m] })));
