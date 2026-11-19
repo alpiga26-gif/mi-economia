@@ -41,6 +41,7 @@
             <label class="f">Tema<select name="tema">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']].map(([v, l]) => `<option value="${v}" ${st.tema === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
             <label class="f">Umbral de similitud para codificar automáticamente (%)<input type="number" name="umbralSimilitud" min="0" max="100" value="${st.umbralSimilitud}"></label>
             <label class="f" style="grid-column:1/-1">Titulares (nombres que aparecen en los recibos y no son el proveedor), separados por comas<input name="titulares" value="${App.esc((st.titulares || []).join(', '))}"></label>
+            <label class="f">Tu código como socio en la actividad compartida (p. ej. tus iniciales)<input name="socioPropio" value="${App.esc(st.socioPropio || '')}"></label>
           </form><button class="btn" id="prefSave" style="align-self:flex-start">Guardar preferencias</button>
         </div>
         <div class="card stack"><h2>ℹ️ Datos en este dispositivo</h2>
@@ -98,10 +99,10 @@
         const cfg = JSON.parse(await f.text());
         if (cfg.tipo !== 'configuracion-mi-economia') throw new Error('No es un archivo de configuración de Mi Economía');
         const r = await App.importConfig(cfg); App.updateBadge();
-        App.toast(`Configuración importada: ${r.plantillas} plantillas nuevas, ${r.titulares} titulares, ${r.prestamos} datos de préstamos`, 5000); App.render();
+        App.toast(`Configuración importada: ${r.plantillas} plantillas nuevas, ${r.titulares} titulares, ${r.prestamos} datos de préstamos, ${r.cuentas} datos de cuentas`, 5000); App.render();
       } catch (err) { App.toast('Error: ' + err.message, 5000); }
     };
-    App.$('#prefSave').onclick = async () => { const p = App.$('#pref'); st.tema = p.tema.value; st.umbralSimilitud = +p.umbralSimilitud.value || 60; st.titulares = p.titulares.value.split(',').map(s => s.trim()).filter(Boolean); await App.db.save(); App.applyTheme(); App.toast('Preferencias guardadas'); App.render(); };
+    App.$('#prefSave').onclick = async () => { const p = App.$('#pref'); st.tema = p.tema.value; st.umbralSimilitud = +p.umbralSimilitud.value || 60; st.titulares = p.titulares.value.split(',').map(s => s.trim()).filter(Boolean); st.socioPropio = p.socioPropio.value.trim(); await App.db.save(); App.applyTheme(); App.toast('Preferencias guardadas'); App.render(); };
     App.$('#wipe').onclick = async () => { if (await App.confirm('Se borrarán todos los datos guardados en este dispositivo (no los de Drive). ¿Continuar?')) { const keep = st.googleClientId; await App.db.replace({ movimientos: [], categorias: [], settings: { googleClientId: keep } }); App.go('dashboard'); } };
   };
 })(window.App);

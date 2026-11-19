@@ -4,8 +4,20 @@
   const isPL = (m) => m.tipo === 'I' || m.tipo === 'G';
   App.isPL = isPL;
 
+  /* ---------- Actividad compartida (p. ej. el olivar, con tus hermanos) ----------
+     Una cuenta marcada como "compartida" en el maestro (con su área de actividad) recoge una actividad que no es solo
+     tuya. Sus movimientos de ese área son de la actividad; los de otra área son tuyos (p. ej. la venta de un piso
+     cobrada en esa cuenta). Tu economía excluye la actividad compartida: solo cuenta lo que entra o sale de ella
+     hacia tus cuentas, como ingreso o gasto. */
+  App.cuentaCompartida = (id) => !!App.cuentaOf(id)?.compartida;
+  App.actividadDe = (id) => App.cuentaOf(id)?.actividad || 'O';
+  App.esCompartido = (m) => App.cuentaCompartida(m.cuenta) && (m.area || '') === App.actividadDe(m.cuenta);
+  App.hayCompartidas = () => App.state.cuentas.some(c => c.compartida);
+
   /* ---------- Filtros y agregados ---------- */
+  // ambito: 'propio' (tu economía), 'compartido' (la actividad compartida) o vacío (todo)
   App.filterMovs = (f = {}) => App.state.movimientos.filter(m =>
+    (!f.ambito || (f.ambito === 'compartido' ? App.esCompartido(m) : !App.esCompartido(m))) &&
     (!f.desde || m.fecha >= f.desde) && (!f.hasta || m.fecha <= f.hasta) &&
     (!f.ym || m.fecha.startsWith(f.ym)) && (!f.area || m.area === f.area) && (!f.cuenta || m.cuenta === f.cuenta) &&
     (!f.tipo || m.tipo === f.tipo) && (!f.categoria || App.catName(m.agrup) === f.categoria) && (!f.agrup || m.agrup === f.agrup) &&
@@ -58,6 +70,7 @@
     return { saldo: R(base + sum), fechaRef: movs[movs.length - 1]?.fecha, metodo: 'acumulado' };
   };
   App.cuentaGrupo = (c) => {
+    if (c?.compartida) return 'Compartida';
     const t = (c?.tipo || '').toLowerCase();
     if (t.includes('tarjeta')) return 'Tarjetas';
     if (t.includes('invers')) return 'Inversión';
@@ -70,9 +83,19 @@
     App.state.movimientos.forEach(m => { if (m.cuenta && !ids.has(m.cuenta.toLowerCase())) ids.set(m.cuenta.toLowerCase(), m.cuenta); });
     return Array.from(ids.values()).map(id => { const c = App.cuentaOf(id); const b = App.balanceAt(id, iso); return { id, banco: c?.banco || '', tipo: c?.tipo || '(no está en el maestro)', grupo: App.cuentaGrupo(c), ...b }; });
   };
+  /* En una cuenta compartida, la parte tuya es lo acumulado por tus movimientos propios (los de otra área);
+     el resto del saldo es caja de la actividad compartida */
+  App.propioEnCuenta = (id, iso) => R(App.state.movimientos.filter(m => (m.cuenta || '').toLowerCase() === id.toLowerCase() && m.fecha <= iso && !App.esCompartido(m))
+    .reduce((a, m) => a + (+m.importe || 0), 0));
   App.liquidity = (iso) => {
     const bs = App.balances(iso); const g = (k) => R(bs.filter(b => b.grupo === k).reduce((a, b) => a + b.saldo, 0));
-    return { bs, disponible: g('Disponible') + g('Efectivo'), efectivo: g('Efectivo'), inversion: g('Inversión'), tarjetas: g('Tarjetas') };
+    bs.filter(b => b.grupo === 'Compartida').forEach(b => { b.propio = App.propioEnCuenta(b.id, iso); b.actividad = R(b.saldo - b.propio); });
+    const comp = bs.filter(b => b.grupo === 'Compartida');
+    // si tus movimientos propios en una cuenta compartida dejan saldo positivo, es dinero tuyo depositado allí;
+    // si es negativo, has usado dinero de la actividad: es un saldo pendiente con ella (no se resta del disponible)
+    const propiosEnCompartidas = R(comp.reduce((a, b) => a + Math.max(0, b.propio), 0)), pendienteConActividad = R(comp.reduce((a, b) => a + Math.max(0, -b.propio), 0));
+    const cajaActividad = R(comp.reduce((a, b) => a + b.actividad, 0));
+    return { bs, disponible: R(g('Disponible') + g('Efectivo') + propiosEnCompartidas), efectivo: g('Efectivo'), inversion: g('Inversión'), tarjetas: g('Tarjetas'), propiosEnCompartidas, pendienteConActividad, cajaActividad };
   };
 
   /* ---------- Préstamos (sistema francés, con carencia de intereses) ---------- */
@@ -133,7 +156,7 @@
   App.isLoanAgrup = (a) => LOAN_CATS.test(a || '') || /pr[eé]stamo|hipoteca/i.test(App.catName(a));
   App.baseline = (endYm, n) => {
     const startYm = App.addMonths(endYm, -(n - 1));
-    const movs = App.filterMovs({ desde: startYm + '-01', hasta: App.endOfMonth(endYm) }).filter(isPL);
+    const movs = App.filterMovs({ desde: startYm + '-01', hasta: App.endOfMonth(endYm), ambito: 'propio' }).filter(isPL);   // la proyección es de tu economía
     const by = {};
     movs.forEach(m => {
       const k = m.agrup || '—';
@@ -221,8 +244,22 @@
       'En cada cuenta y fecha, el apunte que anula el cargo original y las partidas en que se desglosa deben sumar 0. Un descuadre indica una partida que falta, un importe mal tecleado o una partida con fecha distinta.',
       arDesc.map(({ v, s }) => ({ code: v[0].cuenta + ' ' + App.fdate(v[0].fecha), n: v.length, importe: s, ejemplo: v.map(m => `${m.agrup} ${App.num(m.importe)}`).join(' · '), movs: v })));
 
-    // Transferencias / traspasos clasificados como ingreso o gasto
-    const traMal = mv.filter(m => /^tra/i.test(m.agrup || '') && m.tipo !== 'T');
+    // Actividad compartida: el dinero que entra o sale de ella hacia tus cuentas es ingreso o gasto, no traspaso
+    if (App.hayCompartidas()) {
+      const T = mv.filter(m => m.tipo === 'T' && m.importe), usados = new Set(), grupos = [];
+      T.filter(m => App.esCompartido(m)).forEach(c => {
+        const d0 = new Date(c.fecha);
+        const p = T.find(x => !usados.has(x.id) && !App.esCompartido(x) && !App.cuentaCompartida(x.cuenta) && Math.abs((+x.importe) + (+c.importe)) < 0.02 && Math.abs(new Date(x.fecha) - d0) <= 7 * 864e5);
+        if (p) { usados.add(p.id); usados.add(c.id); grupos.push({ code: `${p.cuenta} ⇄ ${c.cuenta} ${App.fdate(c.fecha)}`, n: 2, importe: p.importe, ejemplo: `${p.concepto} ⟷ ${c.concepto}`, movs: [p, c], par: true }); }
+        else if (/^rep:/i.test(c.agrup || '')) grupos.push({ code: `${c.cuenta} ${App.fdate(c.fecha)} · ${c.agrup}`, n: 1, importe: c.importe, ejemplo: c.concepto, movs: [c], par: false });
+      });
+      add('actividad-traspasos', 'alta', 'Movimientos entre la actividad compartida y tus cuentas registrados como traspaso',
+        'La actividad compartida no es solo tuya: lo que sale de ella hacia ti es un reparto (ingreso tuyo, gasto de la actividad) y lo que pones tú es una aportación (gasto tuyo, ingreso de la actividad). Corregir: tu lado pasa a Ingreso/Gasto "Olivar : Reparto recibido / Aportación" y el lado de la actividad a "Reparto / Aportación de socio".',
+        grupos, { fix: 'actividadSocio' });
+    }
+
+    // Transferencias / traspasos clasificados como ingreso o gasto (sin contar los repartos/aportaciones de la actividad compartida)
+    const traMal = mv.filter(m => /^tra/i.test(m.agrup || '') && m.tipo !== 'T' && !App.esCompartido(m));
     add('tra-tipo', 'media', 'Transferencias o traspasos (Agrup Tra:…) con tipo Ingreso o Gasto',
       'Si el dinero se mueve entre tus propias cuentas debería ser tipo T (Traspaso); si no, se cuenta dos veces como gasto o ingreso en el dashboard.',
       Object.entries(groupCount(traMal, m => m.tipo + ' · ' + m.agrup)).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => ({ code: k, n: v.length, importe: R(v.reduce((a, m) => a + m.importe, 0)), ejemplo: v[0].concepto, movs: v })));

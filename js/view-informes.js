@@ -8,9 +8,9 @@
     prestamos: 'Cuadro de amortización de préstamos'
   };
 
-  function build(tipo, desde, hasta, area) {
+  function build(tipo, desde, hasta, area, ambito) {
     const months = App.monthsBetween(App.ym(desde), App.ym(hasta));
-    const movs = App.filterMovs({ desde, hasta, area }).filter(App.isPL);
+    const movs = App.filterMovs({ desde, hasta, area, ambito }).filter(App.isPL);
     const sgn = (m) => +m.importe || 0;
     if (tipo === 'pyg') {
       const rows = {};
@@ -52,7 +52,8 @@
     const last = App.defaultMonth();
     const tipo = p.tipo || 'pyg';
     const desde = p.desde || (last.slice(0, 4) + '-01-01'), hasta = p.hasta || App.endOfMonth(last), area = p.area || '';
-    const rep = build(tipo, desde, hasta, area);
+    const ambito = p.ambito != null ? p.ambito : (App.hayCompartidas() ? 'propio' : '');   // por defecto, tu economía
+    const rep = build(tipo, desde, hasta, area, ambito);
     const title = TIPOS[tipo];
     const sub = (tipo === 'prestamos' ? 'Desde ' + App.fdate(App.today()) : `Del ${App.fdate(desde)} al ${App.fdate(hasta)}`) + (area ? ' · Área ' + App.areaName(area) : '');
     // importes con 2 decimales y punto de miles; recuentos (columna "Nº …") como enteros con punto de miles
@@ -62,6 +63,7 @@
         <label class="f" style="min-width:260px">Informe<select name="tipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${k === tipo ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         <label class="f">Desde<input type="date" name="desde" value="${desde}"></label><label class="f">Hasta<input type="date" name="hasta" value="${hasta}"></label>
         <label class="f">Área<select name="area"><option value="">Todas</option>${App.state.areas.map(a => `<option value="${a.id}" ${a.id === area ? 'selected' : ''}>${App.esc(a.nombre)}</option>`).join('')}</select></label>
+        ${App.hayCompartidas() ? `<label class="f">Ámbito<select name="ambito"><option value="propio" ${ambito === 'propio' ? 'selected' : ''}>Mi economía</option><option value="compartido" ${ambito === 'compartido' ? 'selected' : ''}>Actividad compartida</option><option value="" ${!ambito ? 'selected' : ''}>Todo</option></select></label>` : ''}
         <div class="row">${[['Año en curso', last.slice(0, 4) + '-01-01', App.endOfMonth(last)], ['Año anterior', (+last.slice(0, 4) - 1) + '-01-01', (+last.slice(0, 4) - 1) + '-12-31'], ['Últimos 12 meses', App.addMonths(last, -11) + '-01', App.endOfMonth(last)]].map(([l, d, h]) => `<button type="button" class="btn btn-sm" data-d="${d}" data-h="${h}">${l}</button>`).join('')}</div>
         <button class="btn btn-primary">Ver</button></form>
       <div class="card"><h2>${title}</h2><p class="small muted">${sub}</p>
@@ -75,8 +77,8 @@
     App.$('#xls').onclick = () => App.exportXLSX(`Informe_${tipo}_${desde}_${hasta}`, [{ name: title, rows: [rep.head, ...rep.body, ...(rep.foot ? [rep.foot] : [])] }]);
     App.$('#pdf').onclick = () => App.exportPDF(`Informe_${tipo}_${desde}_${hasta}`, title, sub, [{ head: rep.head, body: rep.body.map(r => r.map(fmt)), foot: rep.foot && rep.foot.map(fmt), numCols: rep.head.map((_, i) => i).filter(i => i >= rep.numFrom) }], { landscape: rep.head.length > 7 });
     App.$('#all').onclick = () => App.exportXLSX(`MiEconomia_${desde}_${hasta}`, [
-      ...Object.keys(TIPOS).map(k => { const r = build(k, desde, hasta, area); return { name: TIPOS[k].slice(0, 31), rows: [r.head, ...r.body, ...(r.foot ? [r.foot] : [])] }; }),
-      { name: 'Movimientos', rows: App.movsToRows(App.filterMovs({ desde, hasta, area })) }
+      ...Object.keys(TIPOS).map(k => { const r = build(k, desde, hasta, area, ambito); return { name: TIPOS[k].slice(0, 31), rows: [r.head, ...r.body, ...(r.foot ? [r.foot] : [])] }; }),
+      { name: 'Movimientos', rows: App.movsToRows(App.filterMovs({ desde, hasta, area, ambito })) }
     ]);
   };
 })(window.App);

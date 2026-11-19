@@ -25,15 +25,17 @@
     }
     const ym = params.mes || App.defaultMonth();
     const area = params.area || '';
+    // ámbito: tu economía (por defecto si hay cuentas compartidas), la actividad compartida o todo
+    const ambito = params.ambito != null ? params.ambito : (App.hayCompartidas() ? 'propio' : '');
     const months = App.monthsWithData();
     const prevYm = App.addMonths(ym, -1);
-    const movs = App.filterMovs({ ym, area });
-    const s = App.summarize(movs), sp = App.summarize(App.filterMovs({ ym: prevYm, area }));
+    const movs = App.filterMovs({ ym, area, ambito });
+    const s = App.summarize(movs), sp = App.summarize(App.filterMovs({ ym: prevYm, area, ambito }));
     const eom = App.endOfMonth(ym);
     const liq = App.liquidity(eom), liqPrev = App.liquidity(App.endOfMonth(prevYm));
     const deuda = App.debtAt(ym);
     const last12 = App.monthsBetween(App.addMonths(ym, -11), ym);
-    const evo = last12.map(m => App.summarize(App.filterMovs({ ym: m, area })));
+    const evo = last12.map(m => App.summarize(App.filterMovs({ ym: m, area, ambito })));
 
     const areaOpts = `<option value="">Todas las áreas</option>` + App.state.areas.map(a => `<option value="${a.id}" ${a.id === area ? 'selected' : ''}>${App.esc(a.nombre)}</option>`).join('');
     const monthOpts = months.slice().reverse().map(m => `<option value="${m}" ${m === ym ? 'selected' : ''}>${App.monthName(m)}</option>`).join('');
@@ -43,13 +45,13 @@
     const gastoCats = catRows.filter(r => r.gastos > 0.005);
     const top = gastoCats.slice(0, 10); const otros = gastoCats.slice(10).reduce((a, r) => a + r.gastos, 0);
     if (otros > 0) top.push({ cat: 'Otras categorías', gastos: otros });
-    const prevCat = App.summarize(App.filterMovs({ ym: prevYm, area })).byCat;
+    const prevCat = App.summarize(App.filterMovs({ ym: prevYm, area, ambito })).byCat;
 
     const areaRows = Object.entries(s.byArea).map(([k, v]) => ({ area: App.areaName(k), ingresos: v.ingresos, gastos: v.gastos, neto: v.ingresos - v.gastos })).sort((a, b) => b.gastos - a.gastos);
     const ctaRows = liq.bs.map(b => ({ ...b, mov: (s.byCuenta[b.id]?.ingresos || 0) - (s.byCuenta[b.id]?.gastos || 0) })).sort((a, b) => a.grupo.localeCompare(b.grupo) || b.saldo - a.saldo);
 
     // Rentabilidad por activo en el año en curso hasta el mes
-    const ytd = App.summarize(App.filterMovs({ desde: ym.slice(0, 4) + '-01-01', hasta: eom, area }));
+    const ytd = App.summarize(App.filterMovs({ desde: ym.slice(0, 4) + '-01-01', hasta: eom, area, ambito }));
     const actRows = Object.entries(ytd.byActivo).map(([k, v]) => ({ activo: k, nombre: App.bienName(k), ingresos: v.ingresos, gastos: v.gastos, neto: v.ingresos - v.gastos })).filter(r => App.idx.bien[r.activo]).sort((a, b) => b.neto - a.neto);
     const ptRows = App.state.prestamos.filter(p => p.capitalPendiente).map(p => { const sch = App.loanSchedule(p); const r = sch.find(x => x.ym === App.addMonths(ym, 1)) || sch[0]; return { id: p.id, entidad: p.entidad, pendiente: App.loanPending(p, ym), cuota: r ? r.cuota : p.cuota, fin: sch.length ? sch[sch.length - 1].ym : '' }; });
 
@@ -60,6 +62,7 @@
           <button class="btn" id="mPrev" aria-label="Mes anterior">◀</button>
           <select id="mSel" aria-label="Mes">${monthOpts}</select>
           <button class="btn" id="mNext" aria-label="Mes siguiente">▶</button>
+          ${App.hayCompartidas() ? `<select id="ambSel" aria-label="Ámbito"><option value="propio" ${ambito === 'propio' ? 'selected' : ''}>Mi economía</option><option value="compartido" ${ambito === 'compartido' ? 'selected' : ''}>Actividad compartida</option><option value="" ${!ambito ? 'selected' : ''}>Todo</option></select>` : ''}
           <select id="aSel" aria-label="Área">${areaOpts}</select>
           <button class="btn" id="xls">⬇️ Excel</button>
           <button class="btn" id="pdf">⬇️ PDF</button>
@@ -69,7 +72,10 @@
         ${kpi('Ingresos del mes', App.eur(s.ingresos), delta(s.ingresos, sp.ingresos))}
         ${kpi('Gastos del mes', App.eur(s.gastos), delta(s.gastos, sp.gastos, true))}
         ${kpi('Ahorro neto', App.eur(s.ahorro), 'Tasa de ahorro: ' + App.pct(s.tasaAhorro), App.cls(s.ahorro))}
-        ${kpi('Saldo disponible', App.eur(liq.disponible), 'Cuentas + efectivo a ' + App.fdate(eom) + '<br>' + delta(liq.disponible, liqPrev.disponible))}
+        ${ambito === 'compartido'
+          ? kpi('Caja de la actividad', App.eur(liq.cajaActividad), 'Cuentas compartidas, sin tu dinero propio, a ' + App.fdate(eom) + '<br>' + delta(liq.cajaActividad, liqPrev.cajaActividad))
+          : kpi('Saldo disponible', App.eur(liq.disponible), 'Cuentas + efectivo a ' + App.fdate(eom) + (liq.propiosEnCompartidas ? `<br>incluye ${App.eur(liq.propiosEnCompartidas)} tuyos en cuentas compartidas` : '') + '<br>' + delta(liq.disponible, liqPrev.disponible))}
+        ${ambito !== 'compartido' && liq.pendienteConActividad ? kpi('Pendiente con la actividad compartida', App.eur(liq.pendienteConActividad), 'Dinero de la actividad usado en movimientos tuyos (ver Actividad compartida)', 'neg') : ''}
         ${kpi('Inversión', App.eur(liq.inversion), 'Trade Republic, eToro…')}
         ${kpi('Deuda tarjetas', App.eur(liq.tarjetas), 'Saldo acumulado de tarjetas', App.cls(liq.tarjetas))}
         ${kpi('Préstamos pendientes', App.eur(deuda), ptRows.length + ' préstamos activos')}
@@ -86,9 +92,10 @@
           ${App.table([{ label: 'Área', key: 'area' }, { label: 'Ingresos', key: 'ingresos', money: 1 }, { label: 'Gastos', key: 'gastos', money: 1 }, { label: 'Neto', key: 'neto', money: 1 }], areaRows.map(r => ({ ...r, gastos: -r.gastos })),
             { total: ['Total', s.ingresos, -s.gastos, s.ahorro] })}</div>
         <div class="card"><h2>Saldo por cuenta a ${App.fdate(eom)}</h2>
-          ${App.table([{ label: 'Cuenta', key: 'id' }, { label: 'Entidad', key: 'banco' }, { label: 'Grupo', key: 'grupo' }, { label: 'Saldo', key: 'saldo', money: 1 }, { label: 'Último mov.', get: r => App.fdate(r.fechaRef) }],
-            ctaRows, { total: ['Total disponible', '', '', liq.disponible, ''] })}
-          <p class="small muted">Saldo tomado del último saldo del extracto; en cuentas sin columna de saldo se acumulan los movimientos desde el saldo inicial del maestro.</p></div>
+          ${App.table([{ label: 'Cuenta', key: 'id' }, { label: 'Entidad', key: 'banco' }, { label: 'Grupo', key: 'grupo' }, { label: 'Saldo', key: 'saldo', money: 1 },
+              ...(App.hayCompartidas() ? [{ label: 'Tuyo', get: r => r.grupo === 'Compartida' ? r.propio : (r.grupo === 'Disponible' || r.grupo === 'Efectivo' ? r.saldo : null), money: 1 }] : []), { label: 'Último mov.', get: r => App.fdate(r.fechaRef) }],
+            ctaRows, { total: App.hayCompartidas() ? ['Total disponible tuyo', '', '', '', liq.disponible, ''] : ['Total disponible', '', '', liq.disponible, ''] })}
+          <p class="small muted">Saldo tomado del último saldo del extracto; en cuentas sin columna de saldo se acumulan los movimientos desde el saldo inicial del maestro.${App.hayCompartidas() ? ' En las cuentas de actividad compartida, "Tuyo" es tu dinero propio que pasó por ellas; el resto es caja de la actividad.' : ''}</p></div>
       </div>
       <div class="grid g-2 mt">
         <div class="card"><h2>Detalle de categorías del mes</h2>
@@ -102,7 +109,8 @@
         </div>
       </div>`;
 
-    const go = (m, a = area) => App.go(`dashboard?mes=${m}${a ? '&area=' + a : ''}`);
+    const go = (m, a = area, am = ambito) => App.go(`dashboard?mes=${m}${a ? '&area=' + a : ''}&ambito=${am}`);
+    const ambS = App.$('#ambSel'); if (ambS) ambS.onchange = (e) => go(ym, area, e.target.value);
     App.$('#mSel').onchange = (e) => go(e.target.value);
     App.$('#aSel').onchange = (e) => go(ym, e.target.value);
     App.$('#mPrev').onclick = () => go(App.addMonths(ym, -1));

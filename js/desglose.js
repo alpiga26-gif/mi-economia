@@ -24,6 +24,10 @@
     (cfg.plantillas || []).forEach(t => { if (t && t.id && !S.plantillas.some(x => x.id === t.id)) { S.plantillas.push(t); r.plantillas++; } });
     const tit = new Set(S.settings.titulares || []); (cfg.titulares || []).forEach(n => { if (n && !tit.has(n)) { tit.add(n); r.titulares++; } }); S.settings.titulares = [...tit];
     (cfg.prestamos || []).forEach(p => { const x = App.idx.ptmo[p.id]; if (x) { Object.entries(p).forEach(([k, v]) => { if (k !== 'id' && (x[k] == null || x[k] === '')) { x[k] = v; r.prestamos++; } }); } });
+    // cuentas de actividad compartida (p. ej. el olivar) y tu código como socio
+    r.cuentas = 0;
+    (cfg.cuentas || []).forEach(c => { const x = App.cuentaOf(c.id); if (x) Object.entries(c).forEach(([k, v]) => { if (k !== 'id' && (x[k] == null || x[k] === '')) { x[k] = v; r.cuentas++; } }); });
+    if (cfg.socioPropio && !S.settings.socioPropio) S.settings.socioPropio = cfg.socioPropio;
     (cfg.reglas || []).forEach(g => { S.reglas = S.reglas || []; if (g && g.texto && !S.reglas.some(x => App.norm(x.texto) === App.norm(g.texto))) S.reglas.push({ id: App.uid('R'), ...g }); });
     await App.db.save();
     return r;

@@ -5,13 +5,14 @@
     tipos: { title: 'Tipos de movimiento', key: 'id', movField: 'tipo', fields: [['id', 'IdTipo'], ['nombre', 'Tipo movimiento'], ['detalle', 'Detalle']] },
     categorias: { title: 'Categorías y subcategorías', key: 'agrup', movField: 'agrup', fields: [['agrup', 'Agrup (código)'], ['supra', 'SupraCategoría'], ['categoria', 'Categoría'], ['subcategoria', 'SubCategoría']] },
     bienes: { title: 'Bienes / activos', key: 'id', movField: 'activo', fields: [['id', 'IdBien'], ['tipo', 'Tipo de bien', 'list:Inmuebles,Garaje,Rústico,Parcela,Vehículo,Mueble,Inversión,Personas'], ['nombre', 'Nombre'], ['lugar', 'Lugar'], ['parcela', 'Parcela'], ['refCatastral', 'Ref. catastral'], ['valor', 'Valor estimado €', 'number']] },
-    cuentas: { title: 'Cuentas bancarias, tarjetas y efectivo', key: 'id', movField: 'cuenta', fields: [['id', 'IdCuenta'], ['banco', 'Banco / entidad'], ['tipo', 'Tipo', 'list:Corriente,Negocio,Inversión,Efectivo,Tarjeta,Ahorro'], ['saldoInicial', 'Saldo inicial €', 'number'], ['fechaSaldoInicial', 'Fecha saldo inicial', 'date'], ['activa', 'Activa', 'bool']] },
+    cuentas: { title: 'Cuentas bancarias, tarjetas y efectivo', key: 'id', movField: 'cuenta', fields: [['id', 'IdCuenta'], ['banco', 'Banco / entidad'], ['tipo', 'Tipo', 'list:Corriente,Negocio,Inversión,Efectivo,Tarjeta,Ahorro'], ['saldoInicial', 'Saldo inicial €', 'number'], ['fechaSaldoInicial', 'Fecha saldo inicial', 'date'], ['activa', 'Activa', 'bool'], ['compartida', 'Actividad compartida (con otros)', 'bool0'], ['actividad', 'Área de la actividad compartida']] },
     prestamos: { title: 'Préstamos', key: 'id', movField: 'activo', fields: [['id', 'IdPtmo'], ['entidad', 'Entidad'], ['tipo', 'Tipo préstamo'], ['identificador', 'Identificador'], ['formalizacion', 'Formalización', 'date'], ['vencimiento', 'Vencimiento', 'date'], ['importe', 'Importe inicial €', 'number'], ['interes', 'Interés (texto)'], ['diferencial', 'Diferencial'], ['capitalPendiente', 'Capital pendiente €', 'number'], ['fechaCapital', 'Fecha del capital pendiente', 'date'], ['tipoAnual', 'Tipo aplicado % anual', 'number'], ['cuotasPendientes', 'Cuotas pendientes (sin carencia)', 'number'], ['cuota', 'Cuota actual €', 'number'], ['finCarencia', 'Fin de carencia', 'date'], ['bien', 'Activo vinculado (bien)']] },
     reglas: { title: 'Reglas de clasificación', key: 'id', movField: null, fields: [['texto', 'Si el concepto contiene'], ['cuenta', 'Solo en la cuenta (opcional)'], ['signo', 'Signo (+, − o vacío)'], ['tipo', 'Tipo'], ['area', 'Área'], ['agrup', 'Agrup'], ['activo', 'Activo'], ['beneficiario', 'Beneficiario']] },
     plantillas: { title: 'Plantillas de desglose', key: 'id', movField: null, custom: true, fields: [] }
   };
 
   const input = (k, label, type, v) => {
+    if (type === 'bool0') return `<label class="f">${label}<select name="${k}"><option value="0" ${v !== true ? 'selected' : ''}>No</option><option value="1" ${v === true ? 'selected' : ''}>Sí</option></select></label>`;
     if (type === 'bool') return `<label class="f">${label}<select name="${k}"><option value="1" ${v !== false ? 'selected' : ''}>Sí</option><option value="0" ${v === false ? 'selected' : ''}>No</option></select></label>`;
     if (type && type.startsWith('list:')) { const id = 'dl' + k; return `<label class="f">${label}<input name="${k}" value="${App.esc(v ?? '')}" list="${id}"><datalist id="${id}">${type.slice(5).split(',').map(o => `<option value="${o}">`).join('')}</datalist></label>`; }
     return `<label class="f">${label}<input name="${k}" type="${type || 'text'}" ${type === 'number' ? 'step="any"' : ''} value="${App.esc(v ?? '')}"></label>`;
@@ -25,7 +26,7 @@
       <div class="modal-actions">${!isNew ? '<button class="btn btn-danger" id="del">Eliminar</button><span class="spacer"></span>' : ''}<button class="btn" data-close>Cancelar</button><button class="btn btn-primary" id="ok">Guardar</button></div>`, (el, close) => {
       el.querySelector('#ok').onclick = async () => {
         const f = el.querySelector('#mf'); const o = {};
-        def.fields.forEach(([k, , t]) => { const v = f[k].value.trim(); o[k] = t === 'number' ? (v === '' ? null : App.parseNum(v)) : t === 'bool' ? v === '1' : v || (t === 'date' ? null : ''); });
+        def.fields.forEach(([k, , t]) => { const v = f[k].value.trim(); o[k] = t === 'number' ? (v === '' ? null : App.parseNum(v)) : (t === 'bool' || t === 'bool0') ? v === '1' : v || (t === 'date' ? null : ''); });
         const autoKey = !def.fields.some(([k]) => k === def.key);
         if (autoKey) o[def.key] = it[def.key] || App.uid('R');
         if (!o[def.key] || (coll === 'reglas' && !o.texto)) return App.toast(coll === 'reglas' ? 'Indica el texto que debe contener el concepto' : 'El código es obligatorio');
@@ -135,11 +136,11 @@
       ${tabs}
       <div class="row" style="margin-bottom:10px"><h2 style="margin:0">${def.title}</h2><span class="spacer"></span><input id="q" placeholder="Buscar…" value="${App.esc(p.q || '')}"></div>
       ${coll === 'reglas' ? '<p class="small muted">Las reglas se crean solas al confirmar movimientos en Revisar (o al marcar "Crear regla" al editar uno). Tienen prioridad sobre la similitud con el histórico; si varias coinciden, gana la de texto más largo.</p>' : ''}
-      ${App.table([...def.fields.filter(([, , t]) => t !== 'bool' || coll === 'cuentas').map(([k, l, t]) => ({ label: l, get: r => t === 'date' ? App.fdate(r[k]) : t === 'bool' ? (r[k] === false ? 'No' : 'Sí') : r[k], money: t === 'number' && k !== 'cuotasPendientes' && k !== 'tipoAnual', num: t === 'number' })),
+      ${App.table([...def.fields.filter(([, , t]) => (t !== 'bool' && t !== 'bool0') || coll === 'cuentas').map(([k, l, t]) => ({ label: l, get: r => t === 'date' ? App.fdate(r[k]) : t === 'bool' ? (r[k] === false ? 'No' : 'Sí') : t === 'bool0' ? (r[k] === true ? 'Sí' : '') : r[k], money: t === 'number' && k !== 'cuotasPendientes' && k !== 'tipoAnual', num: t === 'number' })),
         ...(def.movField ? [{ label: 'Usos', get: r => uses[r[def.key]] || 0, num: 1 }] : [])],
         rows.map(r => ({ ...r, _attrs: `data-k="${App.esc(r[def.key])}" style="cursor:pointer"` })), { maxH: '70vh', color: false })}
       ${coll === 'prestamos' ? '<p class="small muted">Para la proyección se usan: capital pendiente, fecha del capital, tipo aplicado, cuotas pendientes y, si existe, fin de carencia (meses en los que solo se pagan intereses).</p>' : ''}
-      ${coll === 'cuentas' ? '<p class="small muted">El grupo se deduce del Tipo: "Tarjeta" = deuda de tarjetas, "Inversión" = inversión, "Efectivo" y el resto = saldo disponible.</p>' : ''}`;
+      ${coll === 'cuentas' ? '<p class="small muted">El grupo se deduce del Tipo: "Tarjeta" = deuda de tarjetas, "Inversión" = inversión, "Efectivo" y el resto = saldo disponible. Una cuenta con <b>Actividad compartida: Sí</b> (p. ej. la del olivar con tus hermanos) queda fuera de tu economía: sus movimientos del área de la actividad se ven en <i>Actividad compartida</i>; los de otra área son tuyos.</p>' : ''}`;
     App.$$('.tabs button', el).forEach(b => b.onclick = () => App.go('maestro?t=' + b.dataset.t));
     App.$('#q').onchange = (e) => App.go(`maestro?t=${coll}&q=${encodeURIComponent(e.target.value)}`);
     App.$('#nuevo').onclick = () => App.editMaster(coll, null);

@@ -74,7 +74,7 @@
 
   App.views.movimientos = (el, p) => {
     const S = App.state;
-    const f = { ym: p.mes || '', desde: p.desde || '', hasta: p.hasta || '', cuenta: p.cuenta || '', area: p.area || '', tipo: p.tipo || '', categoria: p.categoria || '', texto: p.q || '', activo: p.activo || '' };
+    const f = { ym: p.mes || '', desde: p.desde || '', hasta: p.hasta || '', cuenta: p.cuenta || '', area: p.area || '', tipo: p.tipo || '', categoria: p.categoria || '', texto: p.q || '', activo: p.activo || '', ambito: p.ambito || '' };
     if (!f.ym && !f.desde && !f.hasta && !f.texto && !p.todo) f.ym = App.defaultMonth();
     // Jerarquía: con un mes elegido, "Desde/Hasta" solo pueden moverse dentro de ese mes; sin mes, son libres
     const lim = f.ym ? { min: f.ym + '-01', max: App.endOfMonth(f.ym) } : { min: '', max: '' };
@@ -95,6 +95,7 @@
         <label class="f">Mes<select name="mes"><option value="">— (fechas libres)</option>${months.map(m => `<option value="${m}" ${m === f.ym ? 'selected' : ''}>${App.monthName(m)}</option>`).join('')}</select></label>
         <label class="f"><span>Desde <span class="muted" id="fDesdeAyuda">${f.ym ? '(dentro del mes)' : ''}</span></span><input type="date" name="desde" value="${f.desde}" min="${lim.min}" max="${f.hasta || lim.max}"></label>
         <label class="f"><span>Hasta <span class="muted" id="fHastaAyuda">${f.ym ? '(dentro del mes)' : ''}</span></span><input type="date" name="hasta" value="${f.hasta}" min="${f.desde || lim.min}" max="${lim.max}"></label>
+        ${App.hayCompartidas() ? `<label class="f">Ámbito<select name="ambito"><option value="">Todo</option><option value="propio" ${f.ambito === 'propio' ? 'selected' : ''}>Mi economía</option><option value="compartido" ${f.ambito === 'compartido' ? 'selected' : ''}>Actividad compartida</option></select></label>` : ''}
         <label class="f">Cuenta<select name="cuenta">${opts(S.cuentas, f.cuenta, c => c.id, c => c.id, 'Todas')}</select></label>
         <label class="f">Área<select name="area">${opts(S.areas, f.area, a => a.nombre, a => a.id, 'Todas')}</select></label>
         <label class="f">Tipo<select name="tipo">${opts(S.tipos, f.tipo, t => t.nombre, t => t.id, 'Todos')}</select></label>

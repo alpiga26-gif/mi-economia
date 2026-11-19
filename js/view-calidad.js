@@ -55,6 +55,25 @@
     return { agrup: code, categoria: cat, subcategoria: sub, supra: sub ? `${cat} : ${sub}` : cat };
   };
 
+  /* Actividad compartida: convierte un traspaso con tus cuentas en reparto/aportación (ingreso o gasto en cada lado) */
+  const asegurarCat = (agrup, categoria, subcategoria) => { if (!App.catOf(agrup)) App.state.categorias.push({ agrup, categoria, subcategoria, supra: `${categoria} : ${subcategoria}` }); };
+  App.corregirActividad = (it) => {
+    const socio = (App.state.settings.socioPropio || 'Yo').trim();
+    const area = (m) => App.actividadDe(m.cuenta), nomArea = (a) => App.idx.area[a]?.nombre || a;
+    it.movs.forEach(m => {
+      const entra = (+m.importe) > 0;
+      if (App.esCompartido(m)) {          // lado de la actividad: a ti → reparto (gasto); de ti → aportación de socio (ingreso)
+        m.tipo = entra ? 'I' : 'G'; m.agrup = entra ? `Aps:${socio}` : `Rep:${socio}`;
+        asegurarCat(m.agrup, entra ? 'Aportación socio' : 'Reparto', socio);
+      } else {                            // tu lado: de la actividad → ingreso; a la actividad → gasto
+        const a = it.movs.find(x => App.esCompartido(x)); const ar = a ? area(a) : 'O';
+        m.tipo = entra ? 'I' : 'G'; m.area = ar; m.agrup = entra ? 'Oli:Rep' : 'Oli:Apo';
+        asegurarCat(m.agrup, nomArea(ar), entra ? 'Reparto recibido' : 'Aportación');
+      }
+      m.estado = m.estado === 'AR' ? 'AR' : 'R';
+    });
+  };
+
   App.views.calidad = (el) => {
     const issues = App.validate();
     const total = issues.reduce((a, i) => a + i.items.reduce((b, x) => b + (x.n || 0), 0), 0);
@@ -64,6 +83,7 @@
       <div class="issue-list">${issues.map((is, k) => `<details ${is.sev === 'alta' && k < 2 ? 'open' : ''}><summary><span class="tag ${SEV[is.sev]}">${is.sev}</span><b>${App.esc(is.title)}</b><span class="muted small">${is.items.length} grupos · ${App.int(is.items.reduce((a, x) => a + (x.n || 0), 0))} registros</span></summary>
         <div class="body"><p class="small">${App.esc(is.explain)}</p>
         ${is.fix === 'borrarDuplicados' ? '<p><button class="btn btn-danger btn-sm" data-dupall>Eliminar todas las copias sobrantes (se conserva una)</button></p>' : ''}
+        ${is.fix === 'actividadSocio' ? '<p><button class="btn btn-primary btn-sm" data-actall>Corregir todos</button></p>' : ''}
         ${SUST[is.id] ? `<p class="row small"><span>La columna <b>Sustituir por</b> trae una propuesta cuando la app encuentra un código equivalente en tu maestro. Revísala, cámbiala si hace falta y pulsa <b>Aplicar</b>, o</span><button class="btn btn-sm btn-primary" data-allsust="${k}">Aplicar todas las propuestas marcadas</button></p>` : ''}
         <div class="table-wrap" style="max-height:420px"><table class="t"><thead><tr>${SUST[is.id] ? '<th></th>' : ''}<th>Código / grupo</th><th class="num">Nº</th><th class="num">Importe</th><th>Ejemplo / detalle</th>${SUST[is.id] ? '<th>Sustituir por</th>' : ''}<th></th></tr></thead><tbody>
         ${is.items.map((it, j) => { const sug = SUST[is.id] ? (it.maestro || App.sugerirCodigo(is.id, it.code)) : '';
@@ -93,6 +113,10 @@
       const [k, j] = b.dataset.fix.split(':').map(Number); const is = issues[k], it = is.items[j];
       const after = () => App.render();
       if (is.fix === 'crearAgrup') return App.editMaster('categorias', null, after, propuestaCategoria(it.code));
+      if (is.fix === 'actividadSocio') {
+        if (!(await App.confirm(`¿Convertir en reparto/aportación (ingreso o gasto) estos ${it.n} movimiento(s)?\n\n${it.movs.map(m => `${App.fdate(m.fecha)} ${m.cuenta} ${App.num(m.importe)}`).join('\n')}`))) return;
+        App.corregirActividad(it); await App.db.save(); App.toast('Corregido'); return after();
+      }
       if (is.fix === 'crearArea') return App.editMaster('areas', null, after, { id: it.code });
       if (is.fix === 'crearTipo') return App.editMaster('tipos', null, after, { id: it.code });
       if (is.fix === 'crearBien') return App.editMaster('bienes', null, after, { id: it.code, nombre: it.code });
@@ -103,6 +127,11 @@
       }
       if (is.fix === 'borrarDuplicados') { if (await App.confirm(`¿Eliminar ${it.n - 1} copia(s) de este movimiento?`)) { const del = new Set(it.movs.slice(1).map(m => m.id)); App.state.movimientos = App.state.movimientos.filter(m => !del.has(m.id)); await App.db.save(); after(); } }
     });
+    const aa = App.$('[data-actall]'); if (aa) aa.onclick = async () => {
+      const is = issues.find(i => i.fix === 'actividadSocio');
+      if (!(await App.confirm(`¿Corregir los ${is.items.length} casos (${is.items.reduce((a, x) => a + x.n, 0)} movimientos) como repartos/aportaciones?`))) return;
+      is.items.forEach(it => App.corregirActividad(it)); await App.db.save(); App.toast('Corregidos'); App.render();
+    };
     const da = App.$('[data-dupall]'); if (da) da.onclick = async () => {
       const is = issues.find(i => i.fix === 'borrarDuplicados'); const del = new Set(is.items.flatMap(it => it.movs.slice(1).map(m => m.id)));
       if (await App.confirm(`¿Eliminar ${del.size} movimientos duplicados?`)) { App.state.movimientos = App.state.movimientos.filter(m => !del.has(m.id)); await App.db.save(); App.render(); }
@@ -114,7 +143,7 @@
     App.updateBadge();
   };
   function fixBtn(is, it, k, j) {
-    const label = { crearAgrup: 'Crear en maestro', crearArea: 'Crear área', crearTipo: 'Crear tipo', crearBien: 'Crear bien', borrarDuplicados: 'Quitar copias', unificarAgrup: 'Unificar', unificarCuenta: it.maestro ? 'Unificar' : 'Crear cuenta' }[is.fix];
+    const label = { crearAgrup: 'Crear en maestro', crearArea: 'Crear área', crearTipo: 'Crear tipo', crearBien: 'Crear bien', borrarDuplicados: 'Quitar copias', actividadSocio: 'Corregir', unificarAgrup: 'Unificar', unificarCuenta: it.maestro ? 'Unificar' : 'Crear cuenta' }[is.fix];
     return label ? `<button class="btn btn-sm" data-fix="${k}:${j}">${label}</button>` : '';
   }
 })(window.App);
